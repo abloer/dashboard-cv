@@ -14,7 +14,208 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      activity_logs: {
+        Row: {
+          activity: string
+          created_at: string
+          id: string
+          result: string
+          result_type: Database["public"]["Enums"]["activity_result_type"]
+          timestamp: string
+          unit_id: string | null
+        }
+        Insert: {
+          activity: string
+          created_at?: string
+          id?: string
+          result: string
+          result_type?: Database["public"]["Enums"]["activity_result_type"]
+          timestamp?: string
+          unit_id?: string | null
+        }
+        Update: {
+          activity?: string
+          created_at?: string
+          id?: string
+          result?: string
+          result_type?: Database["public"]["Enums"]["activity_result_type"]
+          timestamp?: string
+          unit_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "activity_logs_unit_id_fkey"
+            columns: ["unit_id"]
+            isOneToOne: false
+            referencedRelation: "fleet_units"
+            referencedColumns: ["unit_id"]
+          },
+        ]
+      }
+      daily_summary: {
+        Row: {
+          active_dump_trucks: number | null
+          active_excavators: number | null
+          avg_cycle_time: number | null
+          created_at: string
+          date: string
+          id: string
+          overall_efficiency: number | null
+          total_dump_trucks: number | null
+          total_excavators: number | null
+          total_loads: number | null
+          total_volume_m3: number | null
+        }
+        Insert: {
+          active_dump_trucks?: number | null
+          active_excavators?: number | null
+          avg_cycle_time?: number | null
+          created_at?: string
+          date?: string
+          id?: string
+          overall_efficiency?: number | null
+          total_dump_trucks?: number | null
+          total_excavators?: number | null
+          total_loads?: number | null
+          total_volume_m3?: number | null
+        }
+        Update: {
+          active_dump_trucks?: number | null
+          active_excavators?: number | null
+          avg_cycle_time?: number | null
+          created_at?: string
+          date?: string
+          id?: string
+          overall_efficiency?: number | null
+          total_dump_trucks?: number | null
+          total_excavators?: number | null
+          total_loads?: number | null
+          total_volume_m3?: number | null
+        }
+        Relationships: []
+      }
+      fleet_units: {
+        Row: {
+          created_at: string
+          id: string
+          last_update: string
+          location: string
+          operator: string | null
+          productivity: number | null
+          status: Database["public"]["Enums"]["fleet_status"]
+          type: Database["public"]["Enums"]["equipment_type"]
+          unit_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_update?: string
+          location: string
+          operator?: string | null
+          productivity?: number | null
+          status?: Database["public"]["Enums"]["fleet_status"]
+          type: Database["public"]["Enums"]["equipment_type"]
+          unit_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_update?: string
+          location?: string
+          operator?: string | null
+          productivity?: number | null
+          status?: Database["public"]["Enums"]["fleet_status"]
+          type?: Database["public"]["Enums"]["equipment_type"]
+          unit_id?: string
+        }
+        Relationships: []
+      }
+      productivity_metrics: {
+        Row: {
+          created_at: string
+          cycle_time_dig: number | null
+          cycle_time_dump: number | null
+          cycle_time_swing: number | null
+          date: string
+          hour: number | null
+          id: string
+          loads_count: number | null
+          productivity_percentage: number | null
+          unit_id: string | null
+          volume_m3: number | null
+        }
+        Insert: {
+          created_at?: string
+          cycle_time_dig?: number | null
+          cycle_time_dump?: number | null
+          cycle_time_swing?: number | null
+          date?: string
+          hour?: number | null
+          id?: string
+          loads_count?: number | null
+          productivity_percentage?: number | null
+          unit_id?: string | null
+          volume_m3?: number | null
+        }
+        Update: {
+          created_at?: string
+          cycle_time_dig?: number | null
+          cycle_time_dump?: number | null
+          cycle_time_swing?: number | null
+          date?: string
+          hour?: number | null
+          id?: string
+          loads_count?: number | null
+          productivity_percentage?: number | null
+          unit_id?: string | null
+          volume_m3?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "productivity_metrics_unit_id_fkey"
+            columns: ["unit_id"]
+            isOneToOne: false
+            referencedRelation: "fleet_units"
+            referencedColumns: ["unit_id"]
+          },
+        ]
+      }
+      reports: {
+        Row: {
+          created_at: string
+          date_generated: string
+          date_range_end: string | null
+          date_range_start: string | null
+          file_path: string | null
+          file_size: string | null
+          id: string
+          name: string
+          report_type: string
+        }
+        Insert: {
+          created_at?: string
+          date_generated?: string
+          date_range_end?: string | null
+          date_range_start?: string | null
+          file_path?: string | null
+          file_size?: string | null
+          id?: string
+          name: string
+          report_type: string
+        }
+        Update: {
+          created_at?: string
+          date_generated?: string
+          date_range_end?: string | null
+          date_range_start?: string | null
+          file_path?: string | null
+          file_size?: string | null
+          id?: string
+          name?: string
+          report_type?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +224,9 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      activity_result_type: "success" | "warning" | "info" | "error"
+      equipment_type: "Excavator" | "Dump Truck" | "Loader" | "Dozer"
+      fleet_status: "Active" | "Idle" | "Maintenance"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +353,10 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      activity_result_type: ["success", "warning", "info", "error"],
+      equipment_type: ["Excavator", "Dump Truck", "Loader", "Dozer"],
+      fleet_status: ["Active", "Idle", "Maintenance"],
+    },
   },
 } as const
