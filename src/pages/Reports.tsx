@@ -9,6 +9,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { FileText, Download, Calendar as CalendarIcon, FileSpreadsheet, File, Clock } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useReports } from "@/hooks/useReports";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const reportTypes = [
   { id: "daily", name: "Daily Operations Report", description: "Summary harian produktivitas & cycle time", icon: FileText },
@@ -17,18 +19,11 @@ const reportTypes = [
   { id: "efficiency", name: "Efficiency Analysis Report", description: "Analisis efisiensi operasional", icon: Clock },
 ];
 
-const recentReports = [
-  { name: "Daily Report - 19 Dec 2025", date: "19/12/2025", type: "PDF", size: "2.4 MB" },
-  { name: "Weekly Report - Week 51", date: "18/12/2025", type: "Excel", size: "5.1 MB" },
-  { name: "Fleet Status - 18 Dec 2025", date: "18/12/2025", type: "PDF", size: "1.8 MB" },
-  { name: "Daily Report - 18 Dec 2025", date: "18/12/2025", type: "PDF", size: "2.2 MB" },
-  { name: "Efficiency Analysis - Dec 2025", date: "17/12/2025", type: "Excel", size: "3.6 MB" },
-];
-
 const Reports = () => {
   const [date, setDate] = useState<Date>();
   const [selectedReport, setSelectedReport] = useState<string>("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const { data: recentReports, isLoading } = useReports();
 
   const handleGenerate = () => {
     setIsGenerating(true);
@@ -135,44 +130,54 @@ const Reports = () => {
       <Card className="p-6 bg-card border-border animate-fade-in">
         <h3 className="text-lg font-semibold text-foreground mb-4">📁 Recent Reports</h3>
         
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border text-left">
-                <th className="pb-3 text-sm font-medium text-muted-foreground">Report Name</th>
-                <th className="pb-3 text-sm font-medium text-muted-foreground">Date</th>
-                <th className="pb-3 text-sm font-medium text-muted-foreground">Type</th>
-                <th className="pb-3 text-sm font-medium text-muted-foreground">Size</th>
-                <th className="pb-3 text-sm font-medium text-muted-foreground text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {recentReports.map((report, index) => (
-                <tr key={index} className="hover:bg-secondary/30 transition-colors">
-                  <td className="py-3 text-foreground">{report.name}</td>
-                  <td className="py-3 text-muted-foreground">{report.date}</td>
-                  <td className="py-3">
-                    <span className={cn(
-                      "px-2 py-1 rounded text-xs font-medium",
-                      report.type === "PDF" 
-                        ? "bg-destructive/20 text-destructive" 
-                        : "bg-success/20 text-success"
-                    )}>
-                      {report.type}
-                    </span>
-                  </td>
-                  <td className="py-3 text-muted-foreground">{report.size}</td>
-                  <td className="py-3 text-right">
-                    <Button variant="ghost" size="sm" className="gap-2 text-primary hover:text-primary">
-                      <Download className="w-4 h-4" />
-                      Download
-                    </Button>
-                  </td>
+        {isLoading ? (
+          <div className="space-y-3">
+            {[...Array(5)].map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border text-left">
+                  <th className="pb-3 text-sm font-medium text-muted-foreground">Report Name</th>
+                  <th className="pb-3 text-sm font-medium text-muted-foreground">Date</th>
+                  <th className="pb-3 text-sm font-medium text-muted-foreground">Type</th>
+                  <th className="pb-3 text-sm font-medium text-muted-foreground">Size</th>
+                  <th className="pb-3 text-sm font-medium text-muted-foreground text-right">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {recentReports?.map((report) => (
+                  <tr key={report.id} className="hover:bg-secondary/30 transition-colors">
+                    <td className="py-3 text-foreground">{report.name}</td>
+                    <td className="py-3 text-muted-foreground">
+                      {format(new Date(report.date_generated), "dd/MM/yyyy")}
+                    </td>
+                    <td className="py-3">
+                      <span className={cn(
+                        "px-2 py-1 rounded text-xs font-medium",
+                        report.report_type === "daily" 
+                          ? "bg-destructive/20 text-destructive" 
+                          : "bg-success/20 text-success"
+                      )}>
+                        {report.report_type.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="py-3 text-muted-foreground">{report.file_size || "-"}</td>
+                    <td className="py-3 text-right">
+                      <Button variant="ghost" size="sm" className="gap-2 text-primary hover:text-primary">
+                        <Download className="w-4 h-4" />
+                        Download
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </DashboardLayout>
   );

@@ -5,8 +5,13 @@ import { ProductivityChart, CycleTimeChart, StatusPieChart, HourlyProductivityCh
 import { FleetStatusTable } from "@/components/dashboard/FleetStatusTable";
 import { ActivityLog } from "@/components/dashboard/ActivityLog";
 import { Shovel, Truck, Timer, Clock, Ruler, Mountain, TrendingUp, Zap } from "lucide-react";
+import { useFleetSummary } from "@/hooks/useFleetData";
+import { useDailySummary } from "@/hooks/useDailySummary";
 
 const Dashboard = () => {
+  const { data: fleetSummary } = useFleetSummary();
+  const { data: dailySummary } = useDailySummary();
+
   return (
     <DashboardLayout>
       <Header 
@@ -18,7 +23,7 @@ const Dashboard = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <MetricCard
           title="Excavator Terdeteksi"
-          value="8 Unit"
+          value={`${fleetSummary?.totalExcavators || 0} Unit`}
           icon={Shovel}
           variant="primary"
           trend={{ value: 12, isPositive: true }}
@@ -26,7 +31,7 @@ const Dashboard = () => {
         />
         <MetricCard
           title="Dump Truck Terdeteksi"
-          value="5 Unit"
+          value={`${fleetSummary?.totalDumpTrucks || 0} Unit`}
           icon={Truck}
           variant="accent"
           trend={{ value: 8, isPositive: true }}
@@ -34,14 +39,14 @@ const Dashboard = () => {
         />
         <MetricCard
           title="Avg. Excavator Cycle"
-          value="78 detik"
+          value={dailySummary?.avg_cycle_time ? `${dailySummary.avg_cycle_time} detik` : "-- detik"}
           icon={Timer}
           variant="warning"
           className="animate-fade-in stagger-3"
         />
         <MetricCard
-          title="Avg. Dump Truck Cycle"
-          value="15 menit"
+          title="Total Loads"
+          value={`${dailySummary?.total_loads || 0}`}
           icon={Clock}
           className="animate-fade-in stagger-4"
         />
@@ -50,27 +55,28 @@ const Dashboard = () => {
       {/* Summary Cards - Row 2 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <MetricCard
-          title="Front Loading Area"
-          value="20 meter"
+          title="Active Units"
+          value={`${fleetSummary?.totalActive || 0}`}
           icon={Ruler}
+          variant="success"
           className="animate-fade-in stagger-5"
         />
         <MetricCard
-          title="Bench Height"
-          value="4 meter"
+          title="Idle Units"
+          value={`${fleetSummary?.totalIdle || 0}`}
           icon={Mountain}
+          variant="warning"
           className="animate-fade-in stagger-6"
         />
         <MetricCard
-          title="Efektifitas FLA"
-          value="100%"
+          title="Total Volume"
+          value={dailySummary?.total_volume_m3 ? `${dailySummary.total_volume_m3} m³` : "-- m³"}
           icon={TrendingUp}
-          variant="success"
           className="animate-fade-in stagger-7"
         />
         <MetricCard
           title="Efektifitas Operasional"
-          value="92%"
+          value={dailySummary?.overall_efficiency ? `${dailySummary.overall_efficiency}%` : "--%"}
           icon={Zap}
           variant="success"
           trend={{ value: 5, isPositive: true }}

@@ -1,27 +1,8 @@
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-
-interface LogEntry {
-  id: string;
-  timestamp: string;
-  unit: string;
-  activity: string;
-  result: string;
-  type: "success" | "warning" | "info" | "error";
-}
-
-const logData: LogEntry[] = [
-  { id: "1", timestamp: "08:45:10", unit: "EX-03", activity: "Loading Material", result: "Efisiensi 93%", type: "success" },
-  { id: "2", timestamp: "08:44:55", unit: "EX-02", activity: "Idle Start", result: "Awaiting truck", type: "warning" },
-  { id: "3", timestamp: "08:44:20", unit: "DT-07", activity: "Dumping", result: "Completed", type: "success" },
-  { id: "4", timestamp: "08:43:30", unit: "EX-01", activity: "Swinging", result: "Normal", type: "info" },
-  { id: "5", timestamp: "08:42:15", unit: "EX-05", activity: "Hydraulic Alert", result: "Pressure Drop", type: "error" },
-  { id: "6", timestamp: "08:41:00", unit: "EX-04", activity: "Digging", result: "Depth Optimal", type: "success" },
-  { id: "7", timestamp: "08:40:45", unit: "DT-06", activity: "Loading", result: "Speed Good", type: "success" },
-  { id: "8", timestamp: "08:39:20", unit: "EX-08", activity: "Cycle Complete", result: "78 seconds", type: "info" },
-  { id: "9", timestamp: "08:38:10", unit: "EX-03", activity: "Dumping to DT-07", result: "Position Safe", type: "success" },
-  { id: "10", timestamp: "08:37:00", unit: "EX-01", activity: "AI Calibration", result: "Auto-adjusted", type: "info" },
-];
+import { useActivityLogs } from "@/hooks/useActivityLogs";
+import { Skeleton } from "@/components/ui/skeleton";
+import { format } from "date-fns";
 
 const typeStyles = {
   success: "text-success",
@@ -38,7 +19,36 @@ const typeBadgeStyles = {
 };
 
 export function ActivityLog({ limit }: { limit?: number }) {
-  const data = limit ? logData.slice(0, limit) : logData;
+  const { data: logData, isLoading, error } = useActivityLogs(limit);
+
+  if (isLoading) {
+    return (
+      <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="font-semibold text-foreground">🕒 AI Activity Log</h3>
+          <Badge variant="outline" className="bg-secondary/50 border-border text-muted-foreground">
+            Live
+          </Badge>
+        </div>
+        <div className="p-4 space-y-3">
+          {[...Array(5)].map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="font-semibold text-foreground">🕒 AI Activity Log</h3>
+        </div>
+        <div className="p-4 text-destructive">Failed to load activity logs</div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
@@ -50,7 +60,7 @@ export function ActivityLog({ limit }: { limit?: number }) {
       </div>
       <div className="max-h-[400px] overflow-y-auto">
         <div className="divide-y divide-border">
-          {data.map((log, index) => (
+          {logData?.map((log, index) => (
             <div 
               key={log.id} 
               className={cn(
@@ -60,14 +70,14 @@ export function ActivityLog({ limit }: { limit?: number }) {
               )}
               style={{ animationFillMode: "forwards" }}
             >
-              <span className={cn("font-mono text-sm font-semibold", typeStyles[log.type])}>
-                [{log.timestamp}]
+              <span className={cn("font-mono text-sm font-semibold", typeStyles[log.result_type])}>
+                [{format(new Date(log.timestamp), "HH:mm:ss")}]
               </span>
               <Badge variant="outline" className="bg-secondary/50 border-border text-foreground shrink-0">
-                {log.unit}
+                {log.unit_id || "SYSTEM"}
               </Badge>
               <span className="text-foreground">{log.activity}</span>
-              <Badge className={cn("ml-auto border shrink-0", typeBadgeStyles[log.type])}>
+              <Badge className={cn("ml-auto border shrink-0", typeBadgeStyles[log.result_type])}>
                 {log.result}
               </Badge>
             </div>
