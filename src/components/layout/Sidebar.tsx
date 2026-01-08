@@ -98,6 +98,17 @@ export function Sidebar() {
         )}
       </button>
 
+      {/* Footer */}
+      <div className={cn(
+        "p-4 border-t border-sidebar-border",
+        collapsed ? "text-center" : ""
+      )}>
+        {!collapsed && (
+          <p className="text-[10px] text-sidebar-foreground/60 animate-fade-in">
+            © 2025
+          </p>
+        )}
+      </div>
     </aside>
   );
 }
