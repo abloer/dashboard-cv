@@ -155,44 +155,41 @@ const Settings = () => {
           </div>
         </Card>
 
-        {/* Security */}
+        {/* System Info */}
         <Card className="p-6 bg-card border-border animate-fade-in">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 rounded-lg bg-success/20 flex items-center justify-center">
               <Shield className="w-5 h-5 text-success" />
             </div>
             <div>
-              <h3 className="font-semibold text-foreground">Security</h3>
-              <p className="text-sm text-muted-foreground">Account security settings</p>
+              <h3 className="font-semibold text-foreground">System Info</h3>
+              <p className="text-sm text-muted-foreground">Dashboard information</p>
             </div>
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-foreground">Two-Factor Auth</p>
-                <p className="text-xs text-muted-foreground">Extra layer of security</p>
-              </div>
-              <Switch />
+            <div className="p-4 bg-secondary/50 rounded-lg border border-border">
+              <p className="text-sm font-medium text-foreground mb-2">Public Monitoring Dashboard</p>
+              <p className="text-xs text-muted-foreground">
+                This is a public read-only dashboard for monitoring fleet operations and productivity metrics. 
+                Data is updated in real-time from connected sensors and equipment.
+              </p>
             </div>
 
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-foreground">Session Timeout</p>
-                <p className="text-xs text-muted-foreground">Auto-logout after inactivity</p>
+                <p className="text-sm font-medium text-foreground">Real-time Updates</p>
+                <p className="text-xs text-muted-foreground">Live data synchronization enabled</p>
               </div>
-              <Switch defaultChecked />
+              <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
             </div>
 
-            <div>
-              <label className="text-sm font-medium text-foreground mb-2 block">
-                Timeout Duration (minutes)
-              </label>
-              <Input 
-                type="number" 
-                defaultValue="30" 
-                className="bg-secondary border-border"
-              />
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">Data Access</p>
+                <p className="text-xs text-muted-foreground">Read-only access mode</p>
+              </div>
+              <span className="text-xs bg-primary/20 text-primary px-2 py-1 rounded">View Only</span>
             </div>
           </div>
         </Card>
