@@ -1,8 +1,8 @@
-# Welcome to your Lovable project
+# Dashboard Computer Vision
 
 ## Project info
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+**URL**: https://axometrix.com/projects/REPLACE_WITH_PROJECT_ID
 
 ## How can I edit this code?
 
