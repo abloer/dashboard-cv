@@ -24,22 +24,23 @@ const Dashboard = () => {
         <MetricCard
           title="Excavator Terdeteksi"
           value={`${fleetSummary?.totalExcavators || 0} Unit`}
+          subtitle={`${fleetSummary?.activeExcavators || 0} aktif`}
           icon={Shovel}
           variant="primary"
-          trend={{ value: 12, isPositive: true }}
           className="animate-fade-in stagger-1"
         />
         <MetricCard
           title="Dump Truck Terdeteksi"
           value={`${fleetSummary?.totalDumpTrucks || 0} Unit`}
+          subtitle={`${fleetSummary?.activeDumpTrucks || 0} aktif`}
           icon={Truck}
           variant="accent"
-          trend={{ value: 8, isPositive: true }}
           className="animate-fade-in stagger-2"
         />
         <MetricCard
           title="Avg. Excavator Cycle"
-          value={dailySummary?.avg_cycle_time ? `${dailySummary.avg_cycle_time} detik` : "-- detik"}
+          value={dailySummary?.avg_cycle_time ? `${dailySummary.avg_cycle_time}s` : "--"}
+          subtitle="detik per cycle"
           icon={Timer}
           variant="warning"
           className="animate-fade-in stagger-3"
@@ -47,6 +48,7 @@ const Dashboard = () => {
         <MetricCard
           title="Total Loads"
           value={`${dailySummary?.total_loads || 0}`}
+          subtitle="loads hari ini"
           icon={Clock}
           className="animate-fade-in stagger-4"
         />
@@ -57,6 +59,7 @@ const Dashboard = () => {
         <MetricCard
           title="Active Units"
           value={`${fleetSummary?.totalActive || 0}`}
+          subtitle="unit beroperasi"
           icon={Ruler}
           variant="success"
           className="animate-fade-in stagger-5"
@@ -64,22 +67,24 @@ const Dashboard = () => {
         <MetricCard
           title="Idle Units"
           value={`${fleetSummary?.totalIdle || 0}`}
+          subtitle="unit standby"
           icon={Mountain}
           variant="warning"
           className="animate-fade-in stagger-6"
         />
         <MetricCard
           title="Total Volume"
-          value={dailySummary?.total_volume_m3 ? `${dailySummary.total_volume_m3} m³` : "-- m³"}
+          value={dailySummary?.total_volume_m3 ? `${dailySummary.total_volume_m3}` : "--"}
+          subtitle="m³ hari ini"
           icon={TrendingUp}
           className="animate-fade-in stagger-7"
         />
         <MetricCard
           title="Efektifitas Operasional"
           value={dailySummary?.overall_efficiency ? `${dailySummary.overall_efficiency}%` : "--%"}
+          subtitle="target 85%"
           icon={Zap}
           variant="success"
-          trend={{ value: 5, isPositive: true }}
           className="animate-fade-in stagger-8"
         />
       </div>
