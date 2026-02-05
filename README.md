@@ -1,40 +1,27 @@
 # Dashboard Computer Vision
 
+## 🚀 Persiapan Cepat (Quick Start)
+
+Jika Anda ingin memindahkan proyek ini ke komputer lain atau menjalankannya secara lokal:
+
+1. **Copy Proyek**: Salin seluruh folder ini.
+2. **Database**: Buka [Supabase](https://supabase.com), buat proyek baru, dan jalankan script di `supabase/setup.sql` pada SQL Editor.
+3. **Konfigurasi**: Salin `.env.example` menjadi `.env` dan masukkan API Key dari Supabase.
+4. **Jalankan**:
+   ```bash
+   npm install
+   npm run dev
+   ```
+
+Untuk panduan lebih lengkap dalam Bahasa Indonesia, lihat [PANDUAN_SETUP_v1.md](./docs/PANDUAN_SETUP_v1.md).
+Dokumentasi teknis lainnya tersedia di folder [`/docs`](./docs/):
+- [Laporan Review Kode](./docs/LAPORAN_REVIEW_v1.md)
+- [Detail Skema Database](./docs/SKEMA_DATABASE_v1.md)
+
 ## Project info
 
 **URL**: https://axometrix.com/projects/REPLACE_WITH_PROJECT_ID
 
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
 
 **Edit a file directly in GitHub**
 

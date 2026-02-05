@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { pb } from "@/integrations/pocketbase/client";
 import { useEffect } from "react";
 
 export interface FleetUnit {
@@ -20,41 +20,33 @@ export function useFleetUnits(limit?: number) {
   const query = useQuery({
     queryKey: ["fleet-units", limit],
     queryFn: async () => {
-      let q = supabase
-        .from("fleet_units")
-        .select("*")
-        .order("last_update", { ascending: false });
-      
-      if (limit) {
-        q = q.limit(limit);
-      }
-      
-      const { data, error } = await q;
-      
-      if (error) throw error;
-      return data as FleetUnit[];
+      const records = await pb.collection("fleet_units").getList(1, limit || 50, {
+        sort: "-last_update",
+      });
+
+      return records.items.map(record => ({
+        id: record.id,
+        unit_id: record.unit_id,
+        type: record.type,
+        location: record.location,
+        status: record.status,
+        operator: record.operator,
+        productivity: record.productivity,
+        last_update: record.last_update,
+        created_at: record.created,
+      })) as FleetUnit[];
     },
   });
 
   // Subscribe to realtime updates
   useEffect(() => {
-    const channel = supabase
-      .channel("fleet-units-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "fleet_units",
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["fleet-units"] });
-        }
-      )
-      .subscribe();
+    pb.collection("fleet_units").subscribe("*", () => {
+      queryClient.invalidateQueries({ queryKey: ["fleet-units"] });
+      queryClient.invalidateQueries({ queryKey: ["fleet-summary"] });
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      pb.collection("fleet_units").unsubscribe("*");
     };
   }, [queryClient]);
 
@@ -65,12 +57,10 @@ export function useFleetSummary() {
   return useQuery({
     queryKey: ["fleet-summary"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("fleet_units")
-        .select("type, status");
-      
-      if (error) throw error;
-      
+      const records = await pb.collection("fleet_units").getFullList({
+        fields: "type,status",
+      });
+
       const summary = {
         totalExcavators: 0,
         activeExcavators: 0,
@@ -80,8 +70,8 @@ export function useFleetSummary() {
         totalIdle: 0,
         totalMaintenance: 0,
       };
-      
-      (data || []).forEach((unit: { type: string; status: string }) => {
+
+      records.forEach((unit) => {
         if (unit.type === "Excavator") {
           summary.totalExcavators++;
           if (unit.status === "Active") summary.activeExcavators++;
@@ -94,7 +84,7 @@ export function useFleetSummary() {
         if (unit.status === "Idle") summary.totalIdle++;
         if (unit.status === "Maintenance") summary.totalMaintenance++;
       });
-      
+
       return summary;
     },
   });

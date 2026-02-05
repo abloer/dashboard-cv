@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { pb } from "@/integrations/pocketbase/client";
 
 export interface Report {
   id: string;
@@ -17,13 +17,21 @@ export function useReports() {
   return useQuery({
     queryKey: ["reports"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("reports")
-        .select("*")
-        .order("date_generated", { ascending: false });
-      
-      if (error) throw error;
-      return data as Report[];
+      const records = await pb.collection("reports").getFullList({
+        sort: "-date_generated",
+      });
+
+      return records.map(record => ({
+        id: record.id,
+        name: record.name,
+        report_type: record.report_type,
+        date_generated: record.date_generated,
+        date_range_start: record.date_range_start,
+        date_range_end: record.date_range_end,
+        file_size: record.file_size,
+        file_path: record.file_path,
+        created_at: record.created,
+      })) as Report[];
     },
   });
 }

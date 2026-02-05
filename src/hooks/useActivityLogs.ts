@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { pb } from "@/integrations/pocketbase/client";
 import { useEffect } from "react";
 
 export interface ActivityLog {
@@ -18,41 +18,32 @@ export function useActivityLogs(limit?: number) {
   const query = useQuery({
     queryKey: ["activity-logs", limit],
     queryFn: async () => {
-      let q = supabase
-        .from("activity_logs")
-        .select("*")
-        .order("timestamp", { ascending: false });
-      
-      if (limit) {
-        q = q.limit(limit);
-      }
-      
-      const { data, error } = await q;
-      
-      if (error) throw error;
-      return data as ActivityLog[];
+      const records = await pb.collection("activity_logs").getList(1, limit || 50, {
+        sort: "-timestamp",
+      });
+
+      return records.items.map(record => ({
+        id: record.id,
+        unit_id: record.unit_id,
+        timestamp: record.timestamp,
+        activity: record.activity,
+        result: record.result,
+        result_type: record.result_type,
+        created_at: record.created,
+      })) as ActivityLog[];
     },
   });
 
   // Subscribe to realtime updates
   useEffect(() => {
-    const channel = supabase
-      .channel("activity-logs-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "activity_logs",
-        },
-        () => {
-          queryClient.invalidateQueries({ queryKey: ["activity-logs"] });
-        }
-      )
-      .subscribe();
+    pb.collection("activity_logs").subscribe("*", (e) => {
+      if (e.action === "create") {
+        queryClient.invalidateQueries({ queryKey: ["activity-logs"] });
+      }
+    });
 
     return () => {
-      supabase.removeChannel(channel);
+      pb.collection("activity_logs").unsubscribe("*");
     };
   }, [queryClient]);
 
