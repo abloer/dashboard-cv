@@ -5,41 +5,44 @@ import { MetricCard } from "@/components/dashboard/MetricCard";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Activity, CheckCircle, AlertTriangle, XCircle, Download, Filter } from "lucide-react";
+import { useFleetSummary } from "@/hooks/useFleetData";
 
 const ActivityPage = () => {
+  const { data: summary } = useFleetSummary();
+
   return (
     <DashboardLayout>
       <Header 
         title="Activity Log" 
-        subtitle="AI-detected activity timeline"
+        subtitle="Timeline hasil analisa video"
       />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <MetricCard
-          title="Total Events Today"
-          value="248"
+          title="Total Analytics"
+          value={`${summary?.totalVideos || 0}`}
           icon={Activity}
           variant="primary"
           className="animate-fade-in stagger-1"
         />
         <MetricCard
-          title="Success Events"
-          value="198"
+          title="Cycle Time"
+          value={`${summary?.cycleTimeCount || 0}`}
           icon={CheckCircle}
           variant="success"
           className="animate-fade-in stagger-2"
         />
         <MetricCard
-          title="Warnings"
-          value="42"
+          title="Bench Height"
+          value={`${summary?.benchHeightCount || 0}`}
           icon={AlertTriangle}
           variant="warning"
           className="animate-fade-in stagger-3"
         />
         <MetricCard
-          title="Errors"
-          value="8"
+          title="Front Loading"
+          value={`${summary?.frontLoadingCount || 0}`}
           icon={XCircle}
           variant="default"
           className="animate-fade-in stagger-4"
@@ -59,9 +62,8 @@ const ActivityPage = () => {
               <SelectValue placeholder="Unit" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Units</SelectItem>
-              <SelectItem value="excavator">Excavator</SelectItem>
-              <SelectItem value="dump-truck">Dump Truck</SelectItem>
+              <SelectItem value="all">All Sources</SelectItem>
+              <SelectItem value="video">Video Analytics</SelectItem>
             </SelectContent>
           </Select>
 
@@ -70,12 +72,10 @@ const ActivityPage = () => {
               <SelectValue placeholder="Activity Type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Activities</SelectItem>
-              <SelectItem value="loading">Loading</SelectItem>
-              <SelectItem value="digging">Digging</SelectItem>
-              <SelectItem value="swinging">Swinging</SelectItem>
-              <SelectItem value="dumping">Dumping</SelectItem>
-              <SelectItem value="idle">Idle</SelectItem>
+              <SelectItem value="all">All Analytics</SelectItem>
+              <SelectItem value="cycle">Cycle Time</SelectItem>
+              <SelectItem value="bench">Bench Height</SelectItem>
+              <SelectItem value="front">Front Loading</SelectItem>
             </SelectContent>
           </Select>
 
@@ -85,9 +85,7 @@ const ActivityPage = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="success">Success</SelectItem>
-              <SelectItem value="warning">Warning</SelectItem>
-              <SelectItem value="error">Error</SelectItem>
+              <SelectItem value="available">Available</SelectItem>
             </SelectContent>
           </Select>
 

@@ -16,39 +16,39 @@ const Dashboard = () => {
     <DashboardLayout>
       <Header 
         title="Dashboard" 
-        subtitle="Real-time monitoring & analytics overview"
+        subtitle="Cloud analytics overview"
       />
 
       {/* Summary Cards - Row 1 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <MetricCard
-          title="Excavator Terdeteksi"
-          value={`${fleetSummary?.totalExcavators || 0} Unit`}
-          subtitle={`${fleetSummary?.activeExcavators || 0} aktif`}
+          title="Total Video"
+          value={`${fleetSummary?.totalVideos || 0}`}
+          subtitle="data analytics"
           icon={Shovel}
           variant="primary"
           className="animate-fade-in stagger-1"
         />
         <MetricCard
-          title="Dump Truck Terdeteksi"
-          value={`${fleetSummary?.totalDumpTrucks || 0} Unit`}
-          subtitle={`${fleetSummary?.activeDumpTrucks || 0} aktif`}
+          title="Cycle Time Analytic"
+          value={`${fleetSummary?.cycleTimeCount || 0}`}
+          subtitle="rekaman"
           icon={Truck}
           variant="accent"
           className="animate-fade-in stagger-2"
         />
         <MetricCard
-          title="Avg. Excavator Cycle"
-          value={dailySummary?.avg_cycle_time ? `${dailySummary.avg_cycle_time}s` : "--"}
-          subtitle="detik per cycle"
+          title="Avg Cycle Time"
+          value={dailySummary?.avgCycleTime ? `${dailySummary.avgCycleTime}s` : "--"}
+          subtitle="rata-rata"
           icon={Timer}
           variant="warning"
           className="animate-fade-in stagger-3"
         />
         <MetricCard
-          title="Total Loads"
-          value={`${dailySummary?.total_loads || 0}`}
-          subtitle="loads hari ini"
+          title="Avg Queue Time"
+          value={dailySummary?.avgQueueTime ? `${dailySummary.avgQueueTime}s` : "--"}
+          subtitle="dump truck"
           icon={Clock}
           className="animate-fade-in stagger-4"
         />
@@ -57,32 +57,32 @@ const Dashboard = () => {
       {/* Summary Cards - Row 2 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <MetricCard
-          title="Active Units"
-          value={`${fleetSummary?.totalActive || 0}`}
-          subtitle="unit beroperasi"
+          title="Bench Height Analytic"
+          value={`${fleetSummary?.benchHeightCount || 0}`}
+          subtitle="rekaman"
           icon={Ruler}
           variant="success"
           className="animate-fade-in stagger-5"
         />
         <MetricCard
-          title="Idle Units"
-          value={`${fleetSummary?.totalIdle || 0}`}
-          subtitle="unit standby"
+          title="Front Loading Analytic"
+          value={`${fleetSummary?.frontLoadingCount || 0}`}
+          subtitle="rekaman"
           icon={Mountain}
           variant="warning"
           className="animate-fade-in stagger-6"
         />
         <MetricCard
-          title="Total Volume"
-          value={dailySummary?.total_volume_m3 ? `${dailySummary.total_volume_m3}` : "--"}
-          subtitle="m³ hari ini"
+          title="Avg Bench Height"
+          value={dailySummary?.avgBenchHeight ? `${dailySummary.avgBenchHeight}m` : "--"}
+          subtitle="rata-rata"
           icon={TrendingUp}
           className="animate-fade-in stagger-7"
         />
         <MetricCard
-          title="Efektifitas Operasional"
-          value={dailySummary?.overall_efficiency ? `${dailySummary.overall_efficiency}%` : "--%"}
-          subtitle="target 85%"
+          title="Avg Estimated Load"
+          value={dailySummary?.avgEstimatedLoad ? `${dailySummary.avgEstimatedLoad}` : "--"}
+          subtitle="dump truck"
           icon={Zap}
           variant="success"
           className="animate-fade-in stagger-8"

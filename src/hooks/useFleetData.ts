@@ -1,88 +1,72 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { pb } from "@/integrations/pocketbase/client";
-import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
-export interface FleetUnit {
-  id: string;
-  unit_id: string;
-  type: "Excavator" | "Dump Truck" | "Loader" | "Dozer";
-  location: string;
-  status: "Active" | "Idle" | "Maintenance";
+export interface VideoAnalyticRow {
+  id: number;
+  fileName: string | null;
+  analyticType: string | null;
+  location: string | null;
   operator: string | null;
-  productivity: number | null;
-  last_update: string;
-  created_at: string;
+  avgCycleTime: number | null;
+  benchHeight: number | null;
+  frontLoadingAreaLength: number | null;
 }
 
-export function useFleetUnits(limit?: number) {
-  const queryClient = useQueryClient();
+export interface VideoAnalyticSummary {
+  totalVideos: number;
+  cycleTimeCount: number;
+  benchHeightCount: number;
+  frontLoadingCount: number;
+}
 
-  const query = useQuery({
-    queryKey: ["fleet-units", limit],
+export function useFleetUnits(limit = 50) {
+  return useQuery({
+    queryKey: ["video-analytic-table", limit],
     queryFn: async () => {
-      const records = await pb.collection("fleet_units").getList(1, limit || 50, {
-        sort: "-last_update",
-      });
+      const { data, error } = await supabase
+        .from("VIDEO_ANALITYC")
+        .select("ID, FILE_NAME, ANALITYC_TYPE, LOCATION, OPERATOR, AVG_CYCLETIME, BENCH_HEIGHT, FRONT_LOADING_AREA_LENGTH")
+        .order("ID", { ascending: false })
+        .limit(limit);
 
-      return records.items.map(record => ({
-        id: record.id,
-        unit_id: record.unit_id,
-        type: record.type,
-        location: record.location,
-        status: record.status,
-        operator: record.operator,
-        productivity: record.productivity,
-        last_update: record.last_update,
-        created_at: record.created,
-      })) as FleetUnit[];
+      if (error) throw error;
+
+      return (data || []).map((row) => ({
+        id: row.ID,
+        fileName: row.FILE_NAME,
+        analyticType: row.ANALITYC_TYPE,
+        location: row.LOCATION,
+        operator: row.OPERATOR,
+        avgCycleTime: row.AVG_CYCLETIME,
+        benchHeight: row.BENCH_HEIGHT,
+        frontLoadingAreaLength: row.FRONT_LOADING_AREA_LENGTH,
+      })) as VideoAnalyticRow[];
     },
   });
-
-  // Subscribe to realtime updates
-  useEffect(() => {
-    pb.collection("fleet_units").subscribe("*", () => {
-      queryClient.invalidateQueries({ queryKey: ["fleet-units"] });
-      queryClient.invalidateQueries({ queryKey: ["fleet-summary"] });
-    });
-
-    return () => {
-      pb.collection("fleet_units").unsubscribe("*");
-    };
-  }, [queryClient]);
-
-  return query;
 }
 
 export function useFleetSummary() {
   return useQuery({
-    queryKey: ["fleet-summary"],
+    queryKey: ["video-analytic-summary"],
     queryFn: async () => {
-      const records = await pb.collection("fleet_units").getFullList({
-        fields: "type,status",
-      });
+      const { data, error } = await supabase
+        .from("VIDEO_ANALITYC")
+        .select("ANALITYC_TYPE");
 
-      const summary = {
-        totalExcavators: 0,
-        activeExcavators: 0,
-        totalDumpTrucks: 0,
-        activeDumpTrucks: 0,
-        totalActive: 0,
-        totalIdle: 0,
-        totalMaintenance: 0,
+      if (error) throw error;
+
+      const summary: VideoAnalyticSummary = {
+        totalVideos: 0,
+        cycleTimeCount: 0,
+        benchHeightCount: 0,
+        frontLoadingCount: 0,
       };
 
-      records.forEach((unit) => {
-        if (unit.type === "Excavator") {
-          summary.totalExcavators++;
-          if (unit.status === "Active") summary.activeExcavators++;
-        }
-        if (unit.type === "Dump Truck") {
-          summary.totalDumpTrucks++;
-          if (unit.status === "Active") summary.activeDumpTrucks++;
-        }
-        if (unit.status === "Active") summary.totalActive++;
-        if (unit.status === "Idle") summary.totalIdle++;
-        if (unit.status === "Maintenance") summary.totalMaintenance++;
+      (data || []).forEach((row) => {
+        summary.totalVideos++;
+        if (row.ANALITYC_TYPE === "CYCLE_TIME_ANALITYC") summary.cycleTimeCount++;
+        if (row.ANALITYC_TYPE === "BENCH_HEIGHT_MESUREMENT") summary.benchHeightCount++;
+        if (row.ANALITYC_TYPE === "FRONT_LOADING_MESUREMENT") summary.frontLoadingCount++;
       });
 
       return summary;

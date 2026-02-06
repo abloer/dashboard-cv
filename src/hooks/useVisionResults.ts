@@ -1,86 +1,49 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { pb } from "@/integrations/pocketbase/client";
-import { toast } from "sonner"; // Assuming sonner is installed/used
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
-export interface VisionAnalysis {
-  id: string;
-  video_name: string;
-  recorded_at: string;
-  location: string;
-  duration: string;
-  status: "Analyzed" | "Processing" | "Pending";
-  notes: string;
-  created: string;
+export interface VideoAnalytic {
+  id: number;
+  fileName: string | null;
+  benchHeight: number | null;
+  frontLoadingAreaLength: number | null;
+  diggingTime: number | null;
+  swingingTime: number | null;
+  dumpingTime: number | null;
+  loadingTime: number | null;
+  analyticType: string | null;
+  location: string | null;
+  operator: string | null;
+  avgCycleTime: number | null;
 }
 
-export interface CreateVisionDTO {
-  video_name: string;
-  recorded_at: string;
-  location: string;
-  duration?: string;
-  status: "Analyzed" | "Processing" | "Pending";
-  notes?: string;
-}
-
-export function useVisionResults() {
+export function useVisionResults(limit = 200) {
   return useQuery({
-    queryKey: ["vision_analysis"],
+    queryKey: ["video-analytic", limit],
     queryFn: async () => {
-      const records = await pb.collection("vision_analysis").getFullList({
-        sort: "-recorded_at",
-      });
-      return records as unknown as VisionAnalysis[];
-    },
-  });
-}
+      const { data, error } = await supabase
+        .from("VIDEO_ANALITYC")
+        .select(
+          "ID, FILE_NAME, BENCH_HEIGHT, FRONT_LOADING_AREA_LENGTH, DIGGING_TIME, SWINGING_TIME, DUMPING_TIME, LOADING_TIME, ANALITYC_TYPE, LOCATION, OPERATOR, AVG_CYCLETIME"
+        )
+        .order("ID", { ascending: false })
+        .limit(limit);
 
-export function useCreateVisionResult() {
-  const queryClient = useQueryClient();
+      if (error) throw error;
 
-  return useMutation({
-    mutationFn: async (data: CreateVisionDTO) => {
-      return await pb.collection("vision_analysis").create(data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["vision_analysis"] });
-      toast.success("Data video berhasil ditambahkan");
-    },
-    onError: (error) => {
-      toast.error("Gagal menambahkan data: " + error.message);
-    },
-  });
-}
-
-export function useUpdateVisionResult() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<CreateVisionDTO> }) => {
-      return await pb.collection("vision_analysis").update(id, data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["vision_analysis"] });
-      toast.success("Data video berhasil diperbarui");
-    },
-    onError: (error) => {
-      toast.error("Gagal memperbarui data: " + error.message);
-    },
-  });
-}
-
-export function useDeleteVisionResult() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (id: string) => {
-      return await pb.collection("vision_analysis").delete(id);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["vision_analysis"] });
-      toast.success("Data video berhasil dihapus");
-    },
-    onError: (error) => {
-      toast.error("Gagal menghapus data: " + error.message);
+      return (data || []).map((row) => ({
+        id: row.ID,
+        fileName: row.FILE_NAME,
+        benchHeight: row.BENCH_HEIGHT,
+        frontLoadingAreaLength: row.FRONT_LOADING_AREA_LENGTH,
+        diggingTime: row.DIGGING_TIME,
+        swingingTime: row.SWINGING_TIME,
+        dumpingTime: row.DUMPING_TIME,
+        loadingTime: row.LOADING_TIME,
+        analyticType: row.ANALITYC_TYPE,
+        location: row.LOCATION,
+        operator: row.OPERATOR,
+        avgCycleTime: row.AVG_CYCLETIME,
+      })) as VideoAnalytic[];
     },
   });
 }

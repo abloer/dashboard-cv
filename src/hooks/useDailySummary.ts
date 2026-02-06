@@ -1,45 +1,90 @@
 import { useQuery } from "@tanstack/react-query";
-import { pb } from "@/integrations/pocketbase/client";
+import { supabase } from "@/integrations/supabase/client";
 
-export interface DailySummary {
-  id: string;
-  date: string;
-  total_excavators: number;
-  active_excavators: number;
-  total_dump_trucks: number;
-  active_dump_trucks: number;
-  avg_cycle_time: number | null;
-  overall_efficiency: number | null;
-  total_loads: number;
-  total_volume_m3: number | null;
-  created_at: string;
+export interface AnalyticsSummary {
+  totalVideos: number;
+  cycleTimeCount: number;
+  benchHeightCount: number;
+  frontLoadingCount: number;
+  avgCycleTime: number | null;
+  avgBenchHeight: number | null;
+  avgFrontLoading: number | null;
+  avgQueueTime: number | null;
+  avgEstimatedLoad: number | null;
 }
 
 export function useDailySummary() {
   return useQuery({
-    queryKey: ["daily-summary"],
+    queryKey: ["analytics-summary"],
     queryFn: async () => {
-      const today = new Date().toISOString().split("T")[0];
+      const [{ data: videoData, error: videoError }, { data: dumpData, error: dumpError }] =
+        await Promise.all([
+          supabase
+            .from("VIDEO_ANALITYC")
+            .select("ANALITYC_TYPE, AVG_CYCLETIME, BENCH_HEIGHT, FRONT_LOADING_AREA_LENGTH"),
+          supabase
+            .from("DUMP_TRUCK_DATA")
+            .select("QUEUE_TIME, ESTIMATED_LOAD"),
+        ]);
 
-      try {
-        const record = await pb.collection("daily_summary").getFirstListItem(`date ~ "${today}"`);
-        return {
-          id: record.id,
-          date: record.date,
-          total_excavators: record.total_excavators,
-          active_excavators: record.active_excavators,
-          total_dump_trucks: record.total_dump_trucks,
-          active_dump_trucks: record.active_dump_trucks,
-          avg_cycle_time: record.avg_cycle_time,
-          overall_efficiency: record.overall_efficiency,
-          total_loads: record.total_loads,
-          total_volume_m3: record.total_volume_m3,
-          created_at: record.created,
-        } as DailySummary;
-      } catch (err) {
-        // Jika tidak ada data untuk hari ini
-        return null;
-      }
+      if (videoError) throw videoError;
+      if (dumpError) throw dumpError;
+
+      const summary: AnalyticsSummary = {
+        totalVideos: 0,
+        cycleTimeCount: 0,
+        benchHeightCount: 0,
+        frontLoadingCount: 0,
+        avgCycleTime: null,
+        avgBenchHeight: null,
+        avgFrontLoading: null,
+        avgQueueTime: null,
+        avgEstimatedLoad: null,
+      };
+
+      let cycleTimeTotal = 0;
+      let cycleTimeCount = 0;
+      let benchTotal = 0;
+      let benchCount = 0;
+      let frontTotal = 0;
+      let frontCount = 0;
+
+      (videoData || []).forEach((row) => {
+        summary.totalVideos++;
+        if (row.ANALITYC_TYPE === "CYCLE_TIME_ANALITYC") summary.cycleTimeCount++;
+        if (row.ANALITYC_TYPE === "BENCH_HEIGHT_MESUREMENT") summary.benchHeightCount++;
+        if (row.ANALITYC_TYPE === "FRONT_LOADING_MESUREMENT") summary.frontLoadingCount++;
+
+        if (row.AVG_CYCLETIME !== null) {
+          cycleTimeTotal += Number(row.AVG_CYCLETIME);
+          cycleTimeCount++;
+        }
+        if (row.BENCH_HEIGHT !== null) {
+          benchTotal += Number(row.BENCH_HEIGHT);
+          benchCount++;
+        }
+        if (row.FRONT_LOADING_AREA_LENGTH !== null) {
+          frontTotal += Number(row.FRONT_LOADING_AREA_LENGTH);
+          frontCount++;
+        }
+      });
+
+      const queueValues = (dumpData || []).map((row) => row.QUEUE_TIME).filter((v) => v !== null);
+      const loadValues = (dumpData || []).map((row) => row.ESTIMATED_LOAD).filter((v) => v !== null);
+
+      summary.avgCycleTime = cycleTimeCount > 0 ? Number((cycleTimeTotal / cycleTimeCount).toFixed(2)) : null;
+      summary.avgBenchHeight = benchCount > 0 ? Number((benchTotal / benchCount).toFixed(2)) : null;
+      summary.avgFrontLoading = frontCount > 0 ? Number((frontTotal / frontCount).toFixed(2)) : null;
+      summary.avgQueueTime =
+        queueValues.length > 0
+          ? Number((queueValues.reduce((a, b) => a + Number(b), 0) / queueValues.length).toFixed(2))
+          : null;
+      summary.avgEstimatedLoad =
+        loadValues.length > 0
+          ? Number((loadValues.reduce((a, b) => a + Number(b), 0) / loadValues.length).toFixed(2))
+          : null;
+
+      return summary;
     },
   });
 }

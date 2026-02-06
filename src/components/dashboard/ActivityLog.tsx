@@ -2,21 +2,6 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { useActivityLogs } from "@/hooks/useActivityLogs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format } from "date-fns";
-
-const typeStyles = {
-  success: "text-success",
-  warning: "text-warning",
-  info: "text-primary",
-  error: "text-destructive",
-};
-
-const typeBadgeStyles = {
-  success: "bg-success/20 text-success border-success/30",
-  warning: "bg-warning/20 text-warning border-warning/30",
-  info: "bg-primary/20 text-primary border-primary/30",
-  error: "bg-destructive/20 text-destructive border-destructive/30",
-};
 
 export function ActivityLog({ limit }: { limit?: number }) {
   const { data: logData, isLoading, error } = useActivityLogs(limit);
@@ -25,7 +10,7 @@ export function ActivityLog({ limit }: { limit?: number }) {
     return (
       <div className="bg-card rounded-xl border border-border overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h3 className="font-semibold text-foreground">🕒 AI Activity Log</h3>
+          <h3 className="font-semibold text-foreground">🧾 Analytic Log</h3>
           <Badge variant="outline" className="bg-secondary/50 border-border text-muted-foreground">
             Live
           </Badge>
@@ -43,9 +28,9 @@ export function ActivityLog({ limit }: { limit?: number }) {
     return (
       <div className="bg-card rounded-xl border border-border overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <h3 className="font-semibold text-foreground">🕒 AI Activity Log</h3>
+          <h3 className="font-semibold text-foreground">🧾 Analytic Log</h3>
         </div>
-        <div className="p-4 text-destructive">Failed to load activity logs</div>
+        <div className="p-4 text-destructive">Failed to load analytics</div>
       </div>
     );
   }
@@ -53,7 +38,7 @@ export function ActivityLog({ limit }: { limit?: number }) {
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
       <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-        <h3 className="font-semibold text-foreground">🕒 AI Activity Log</h3>
+        <h3 className="font-semibold text-foreground">🧾 Analytic Log</h3>
         <Badge variant="outline" className="bg-secondary/50 border-border text-muted-foreground">
           Live
         </Badge>
@@ -70,15 +55,19 @@ export function ActivityLog({ limit }: { limit?: number }) {
               )}
               style={{ animationFillMode: "forwards" }}
             >
-              <span className={cn("font-mono text-sm font-semibold", typeStyles[log.result_type])}>
-                [{format(new Date(log.timestamp), "HH:mm:ss")}]
+              <span className="font-mono text-xs text-muted-foreground shrink-0">
+                #{log.id}
               </span>
               <Badge variant="outline" className="bg-secondary/50 border-border text-foreground shrink-0">
-                {log.unit_id || "SYSTEM"}
+                {log.analyticType || "UNKNOWN"}
               </Badge>
-              <span className="text-foreground">{log.activity}</span>
-              <Badge className={cn("ml-auto border shrink-0", typeBadgeStyles[log.result_type])}>
-                {log.result}
+              <span className="text-foreground">
+                {log.fileName || "Unnamed Video"}
+                {log.location ? ` • ${log.location}` : ""}
+                {log.operator ? ` • ${log.operator}` : ""}
+              </span>
+              <Badge className="ml-auto border shrink-0 bg-primary/10 text-primary">
+                {log.avgCycleTime ? `${log.avgCycleTime}s` : log.benchHeight ? `${log.benchHeight}m` : log.frontLoadingAreaLength ? `${log.frontLoadingAreaLength}m` : "-"}
               </Badge>
             </div>
           ))}

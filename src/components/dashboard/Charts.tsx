@@ -38,7 +38,7 @@ export function ProductivityChart() {
   const { data, isLoading } = useProductivityByUnit();
 
   return (
-    <ChartCard title="📈 Produktivitas Excavator per Unit">
+    <ChartCard title="📈 Avg Cycle Time per Operator">
       {isLoading ? (
         <ChartSkeleton />
       ) : !data || data.length === 0 ? (
@@ -65,16 +65,16 @@ export function ProductivityChart() {
               }}
             />
             <Bar 
-              dataKey="productivity" 
+              dataKey="avgCycleTime" 
               fill="hsl(var(--primary))" 
               radius={[4, 4, 0, 0]}
-              name="Productivity (%)"
+              name="Avg Cycle Time (s)"
             />
             <Bar 
               dataKey="target" 
               fill="hsl(var(--muted))" 
               radius={[4, 4, 0, 0]}
-              name="Target"
+              name="Target (s)"
             />
           </BarChart>
         </ResponsiveContainer>
@@ -87,7 +87,7 @@ export function CycleTimeChart() {
   const { data, isLoading } = useCycleTimeByHour();
 
   return (
-    <ChartCard title="⏱️ Cycle Time Trend">
+    <ChartCard title="⏱️ Cycle Time Components">
       {isLoading ? (
         <ChartSkeleton />
       ) : !data || data.length === 0 ? (
@@ -97,7 +97,7 @@ export function CycleTimeChart() {
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
             <XAxis 
-              dataKey="time" 
+              dataKey="label" 
               tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
               axisLine={{ stroke: "hsl(var(--border))" }}
             />
@@ -116,7 +116,7 @@ export function CycleTimeChart() {
             <Legend />
             <Line 
               type="monotone" 
-              dataKey="digging" 
+              dataKey="digging"
               stroke="hsl(var(--primary))" 
               strokeWidth={2}
               dot={{ fill: "hsl(var(--primary))", strokeWidth: 0 }}
@@ -138,6 +138,14 @@ export function CycleTimeChart() {
               dot={{ fill: "hsl(var(--warning))", strokeWidth: 0 }}
               name="Dumping (s)"
             />
+            <Line 
+              type="monotone" 
+              dataKey="loading" 
+              stroke="hsl(var(--success))" 
+              strokeWidth={2}
+              dot={{ fill: "hsl(var(--success))", strokeWidth: 0 }}
+              name="Loading (s)"
+            />
           </LineChart>
         </ResponsiveContainer>
       )}
@@ -149,7 +157,7 @@ export function StatusPieChart() {
   const { data, isLoading } = useFleetStatusDistribution();
 
   return (
-    <ChartCard title="🚜 Fleet Status Distribution">
+    <ChartCard title="🧭 Analytic Type Distribution">
       {isLoading ? (
         <ChartSkeleton />
       ) : !data || data.every(d => d.value === 0) ? (
@@ -193,7 +201,7 @@ export function HourlyProductivityChart() {
   const { data, isLoading } = useHourlyProductivityTrend();
 
   return (
-    <ChartCard title="📊 Hourly Productivity Trend">
+    <ChartCard title="📊 Avg Estimated Load by Truck Type">
       {isLoading ? (
         <ChartSkeleton />
       ) : !data || data.length === 0 ? (
@@ -232,7 +240,7 @@ export function HourlyProductivityChart() {
               fillOpacity={1} 
               fill="url(#colorValue)"
               strokeWidth={2}
-              name="Productivity %"
+              name="Estimated Load"
             />
           </AreaChart>
         </ResponsiveContainer>

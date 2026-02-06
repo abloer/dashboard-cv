@@ -35,8 +35,8 @@ const Reports = () => {
   return (
     <DashboardLayout>
       <Header 
-        title="Reports" 
-        subtitle="Generate & download operational reports"
+        title="Analytics" 
+        subtitle="Daftar hasil analitik yang tersinkron ke cloud"
       />
 
       {/* Report Generator */}
@@ -126,9 +126,9 @@ const Reports = () => {
         </div>
       </Card>
 
-      {/* Recent Reports */}
+      {/* Latest Analytics */}
       <Card className="p-6 bg-card border-border animate-fade-in">
-        <h3 className="text-lg font-semibold text-foreground mb-4">📁 Recent Reports</h3>
+        <h3 className="text-lg font-semibold text-foreground mb-4">📁 Latest Analytics</h3>
         
         {isLoading ? (
           <div className="space-y-3">
@@ -141,36 +141,22 @@ const Reports = () => {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border text-left">
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Report Name</th>
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Date</th>
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Type</th>
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Size</th>
-                  <th className="pb-3 text-sm font-medium text-muted-foreground text-right">Action</th>
+                  <th className="pb-3 text-sm font-medium text-muted-foreground">File</th>
+                  <th className="pb-3 text-sm font-medium text-muted-foreground">Analytic Type</th>
+                  <th className="pb-3 text-sm font-medium text-muted-foreground">Location</th>
+                  <th className="pb-3 text-sm font-medium text-muted-foreground">Operator</th>
+                  <th className="pb-3 text-sm font-medium text-muted-foreground text-right">Avg Cycle</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {recentReports?.map((report) => (
                   <tr key={report.id} className="hover:bg-secondary/30 transition-colors">
-                    <td className="py-3 text-foreground">{report.name}</td>
-                    <td className="py-3 text-muted-foreground">
-                      {format(new Date(report.date_generated), "dd/MM/yyyy")}
-                    </td>
-                    <td className="py-3">
-                      <span className={cn(
-                        "px-2 py-1 rounded text-xs font-medium",
-                        report.report_type === "daily" 
-                          ? "bg-destructive/20 text-destructive" 
-                          : "bg-success/20 text-success"
-                      )}>
-                        {report.report_type.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="py-3 text-muted-foreground">{report.file_size || "-"}</td>
-                    <td className="py-3 text-right">
-                      <Button variant="ghost" size="sm" className="gap-2 text-primary hover:text-primary">
-                        <Download className="w-4 h-4" />
-                        Download
-                      </Button>
+                    <td className="py-3 text-foreground">{report.fileName || "-"}</td>
+                    <td className="py-3 text-muted-foreground">{report.analyticType || "-"}</td>
+                    <td className="py-3 text-muted-foreground">{report.location || "-"}</td>
+                    <td className="py-3 text-muted-foreground">{report.operator || "-"}</td>
+                    <td className="py-3 text-right text-muted-foreground">
+                      {report.avgCycleTime ? `${report.avgCycleTime}s` : "-"}
                     </td>
                   </tr>
                 ))}

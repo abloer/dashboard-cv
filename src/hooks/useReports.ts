@@ -1,37 +1,39 @@
 import { useQuery } from "@tanstack/react-query";
-import { pb } from "@/integrations/pocketbase/client";
+import { supabase } from "@/integrations/supabase/client";
 
-export interface Report {
-  id: string;
-  name: string;
-  report_type: string;
-  date_generated: string;
-  date_range_start: string | null;
-  date_range_end: string | null;
-  file_size: string | null;
-  file_path: string | null;
-  created_at: string;
+export interface AnalyticReportRow {
+  id: number;
+  fileName: string | null;
+  analyticType: string | null;
+  location: string | null;
+  operator: string | null;
+  avgCycleTime: number | null;
+  benchHeight: number | null;
+  frontLoadingAreaLength: number | null;
 }
 
-export function useReports() {
+export function useReports(limit = 200) {
   return useQuery({
-    queryKey: ["reports"],
+    queryKey: ["video-analytic-report", limit],
     queryFn: async () => {
-      const records = await pb.collection("reports").getFullList({
-        sort: "-date_generated",
-      });
+      const { data, error } = await supabase
+        .from("VIDEO_ANALITYC")
+        .select("ID, FILE_NAME, ANALITYC_TYPE, LOCATION, OPERATOR, AVG_CYCLETIME, BENCH_HEIGHT, FRONT_LOADING_AREA_LENGTH")
+        .order("ID", { ascending: false })
+        .limit(limit);
 
-      return records.map(record => ({
-        id: record.id,
-        name: record.name,
-        report_type: record.report_type,
-        date_generated: record.date_generated,
-        date_range_start: record.date_range_start,
-        date_range_end: record.date_range_end,
-        file_size: record.file_size,
-        file_path: record.file_path,
-        created_at: record.created,
-      })) as Report[];
+      if (error) throw error;
+
+      return (data || []).map((row) => ({
+        id: row.ID,
+        fileName: row.FILE_NAME,
+        analyticType: row.ANALITYC_TYPE,
+        location: row.LOCATION,
+        operator: row.OPERATOR,
+        avgCycleTime: row.AVG_CYCLETIME,
+        benchHeight: row.BENCH_HEIGHT,
+        frontLoadingAreaLength: row.FRONT_LOADING_AREA_LENGTH,
+      })) as AnalyticReportRow[];
     },
   });
 }

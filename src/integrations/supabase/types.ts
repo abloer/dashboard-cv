@@ -216,6 +216,156 @@ export type Database = {
         }
         Relationships: []
       }
+      VIDEO_ANALITYC: {
+        Row: {
+          ID: number
+          FILE_NAME: string | null
+          BENCH_HEIGHT: number | null
+          FRONT_LOADING_AREA_LENGTH: number | null
+          DIGGING_TIME: number | null
+          SWINGING_TIME: number | null
+          DUMPING_TIME: number | null
+          LOADING_TIME: number | null
+          ANALITYC_TYPE: string | null
+          LOCATION: string | null
+          OPERATOR: string | null
+          AVG_CYCLETIME: number | null
+        }
+        Insert: {
+          ID?: number
+          FILE_NAME?: string | null
+          BENCH_HEIGHT?: number | null
+          FRONT_LOADING_AREA_LENGTH?: number | null
+          DIGGING_TIME?: number | null
+          SWINGING_TIME?: number | null
+          DUMPING_TIME?: number | null
+          LOADING_TIME?: number | null
+          ANALITYC_TYPE?: string | null
+          LOCATION?: string | null
+          OPERATOR?: string | null
+          AVG_CYCLETIME?: number | null
+        }
+        Update: {
+          ID?: number
+          FILE_NAME?: string | null
+          BENCH_HEIGHT?: number | null
+          FRONT_LOADING_AREA_LENGTH?: number | null
+          DIGGING_TIME?: number | null
+          SWINGING_TIME?: number | null
+          DUMPING_TIME?: number | null
+          LOADING_TIME?: number | null
+          ANALITYC_TYPE?: string | null
+          LOCATION?: string | null
+          OPERATOR?: string | null
+          AVG_CYCLETIME?: number | null
+        }
+        Relationships: []
+      }
+      EXCAVATOR_DATA: {
+        Row: {
+          ID: number
+          EXCAVATOR_TYPE_FK: number | null
+          VIDEO_ANALITYC_FK: number | null
+        }
+        Insert: {
+          ID?: number
+          EXCAVATOR_TYPE_FK?: number | null
+          VIDEO_ANALITYC_FK?: number | null
+        }
+        Update: {
+          ID?: number
+          EXCAVATOR_TYPE_FK?: number | null
+          VIDEO_ANALITYC_FK?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_EXCAVATOR_DATA_EXCAVATOR_TYPE_FK_EXCAVATOR_TYPE"
+            columns: ["EXCAVATOR_TYPE_FK"]
+            isOneToOne: false
+            referencedRelation: "EXCAVATOR_TYPE"
+            referencedColumns: ["ID"]
+          },
+          {
+            foreignKeyName: "fk_EXCAVATOR_DATA_VIDEO_ANALITYC_FK_VIDEO_ANALITYC"
+            columns: ["VIDEO_ANALITYC_FK"]
+            isOneToOne: false
+            referencedRelation: "VIDEO_ANALITYC"
+            referencedColumns: ["ID"]
+          },
+        ]
+      }
+      DUMP_TRUCK_DATA: {
+        Row: {
+          ID: number
+          VIDEO_ANALITYC_FK: number | null
+          DUMP_TRUCK_TYPE_FK: number | null
+          QUEUE_TIME: number | null
+          ESTIMATED_LOAD: number | null
+        }
+        Insert: {
+          ID?: number
+          VIDEO_ANALITYC_FK?: number | null
+          DUMP_TRUCK_TYPE_FK?: number | null
+          QUEUE_TIME?: number | null
+          ESTIMATED_LOAD?: number | null
+        }
+        Update: {
+          ID?: number
+          VIDEO_ANALITYC_FK?: number | null
+          DUMP_TRUCK_TYPE_FK?: number | null
+          QUEUE_TIME?: number | null
+          ESTIMATED_LOAD?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_DUMP_TRUCK_DATA_DUMP_TRUCK_TYPE_FK_DUMP_TRUCK_TYPE"
+            columns: ["DUMP_TRUCK_TYPE_FK"]
+            isOneToOne: false
+            referencedRelation: "DUMP_TRUCK_TYPE"
+            referencedColumns: ["ID"]
+          },
+          {
+            foreignKeyName: "fk_DUMP_TRUCK_DATA_VIDEO_ANALITYC_FK_VIDEO_ANALITYC"
+            columns: ["VIDEO_ANALITYC_FK"]
+            isOneToOne: false
+            referencedRelation: "VIDEO_ANALITYC"
+            referencedColumns: ["ID"]
+          },
+        ]
+      }
+      EXCAVATOR_TYPE: {
+        Row: {
+          ID: number
+          TYPE: string | null
+        }
+        Insert: {
+          ID?: number
+          TYPE?: string | null
+        }
+        Update: {
+          ID?: number
+          TYPE?: string | null
+        }
+        Relationships: []
+      }
+      DUMP_TRUCK_TYPE: {
+        Row: {
+          ID: number
+          TYPE: string | null
+          TURNING_RADIUS: number | null
+        }
+        Insert: {
+          ID?: number
+          TYPE?: string | null
+          TURNING_RADIUS?: number | null
+        }
+        Update: {
+          ID?: number
+          TYPE?: string | null
+          TURNING_RADIUS?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
