@@ -1,0 +1,64 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
+        VITE_SUPABASE_PROJECT_ID: ${VITE_SUPABASE_PROJECT_ID}
+        VITE_ANALYSIS_SERVER_URL: ${VITE_ANALYSIS_SERVER_URL:-/api}
+        VITE_POCKETBASE_URL: ${VITE_POCKETBASE_URL:-/pb}
+    depends_on:
+      backend:
+        condition: service_healthy
+      pocketbase:
+        condition: service_started
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-web}
+      - traefik.http.routers.dashboard-cv-ut.rule=Host(`${APP_HOST}`)
+      - traefik.http.routers.dashboard-cv-ut.entrypoints=websecure
+      - traefik.http.routers.dashboard-cv-ut.tls.certresolver=${TRAEFIK_CERTRESOLVER:-le}
+      - traefik.http.services.dashboard-cv-ut.loadbalancer.server.port=80
+    networks:
+      - app
+      - web
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      PORT: ${PORT:-8081}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      ANALYSIS_OUTPUT_ROOT: ${ANALYSIS_OUTPUT_ROOT:-/app/runtime-analysis}
+      ANALYSIS_PYTHON_BIN: ${ANALYSIS_PYTHON_BIN:-/opt/venv/bin/python}
+    restart: unless-stopped
+    volumes:
+      - ./server/data:/app/server/data
+      - ./runtime-analysis:/app/runtime-analysis
+      - ./models:/app/models:ro
+    networks:
+      - app
+
+  pocketbase:
+    build:
+      context: .
+      dockerfile: Dockerfile.pocketbase
+      args:
+        POCKETBASE_VERSION: ${POCKETBASE_VERSION:-0.26.6}
+    restart: unless-stopped
+    volumes:
+      - ./pb_data:/pb/pb_data
+    networks:
+      - app
+
+networks:
+  app:
+    driver: bridge
+  web:
+    external: true
+    name: ${TRAEFIK_NETWORK:-web}

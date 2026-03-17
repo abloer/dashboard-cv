@@ -4,12 +4,15 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
-import Dashboard from "./pages/Dashboard";
-import Fleet from "./pages/Fleet";
-import Activity from "./pages/Activity";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import OutputData from "./pages/OutputData";
+import NoHelmetAnalysis from "./pages/NoHelmetAnalysis";
+import AnalysisSetup from "./pages/AnalysisSetup";
+import NoHelmetSetup from "./pages/NoHelmetSetup";
+import Models from "./pages/Models";
+import LiveMonitoring from "./pages/LiveMonitoring";
 
 const queryClient = new QueryClient();
 
@@ -21,9 +24,12 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/fleet" element={<Fleet />} />
-          <Route path="/activity" element={<Activity />} />
+          <Route path="/output-data" element={<OutputData />} />
+          <Route path="/analysis-setup" element={<AnalysisSetup />} />
+          <Route path="/no-helmet-setup" element={<NoHelmetSetup />} />
+          <Route path="/no-helmet-analysis" element={<NoHelmetAnalysis />} />
+          <Route path="/live-monitoring" element={<LiveMonitoring />} />
+          <Route path="/models" element={<Models />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/settings" element={<Settings />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

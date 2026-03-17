@@ -1,0 +1,11 @@
+{
+  "roi_id": "area-produksi-default",
+  "normalized": true,
+  "polygon": [
+    [0.0, 0.0],
+    [1.0, 0.0],
+    [1.0, 1.0],
+    [0.0, 1.0]
+  ]
+}
+

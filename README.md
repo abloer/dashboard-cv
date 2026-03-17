@@ -58,3 +58,34 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+## Docker Deploy
+
+Repo ini sekarang punya artefak deploy container:
+
+- `Dockerfile.frontend`
+- `Dockerfile.backend`
+- `Dockerfile.pocketbase`
+- `docker-compose.yml`
+- `.env.production.example`
+- `deploy/nginx.conf`
+
+Quick start:
+
+```bash
+cp .env.production.example .env.production
+docker compose --env-file .env.production build
+docker compose --env-file .env.production up -d
+```
+
+Arsitektur deploy:
+
+- `frontend`: Vite build yang di-serve oleh nginx
+- `backend`: Node + Python + ffmpeg untuk API analisis
+- `pocketbase`: runtime untuk data `productivity_metrics`
+
+Reverse proxy nginx meneruskan:
+
+- `/api/*` ke backend
+- `/analysis-output/*` ke backend
+- `/pb/*` ke PocketBase
