@@ -8,12 +8,9 @@ services:
         VITE_SUPABASE_PUBLISHABLE_KEY: ${VITE_SUPABASE_PUBLISHABLE_KEY}
         VITE_SUPABASE_PROJECT_ID: ${VITE_SUPABASE_PROJECT_ID}
         VITE_ANALYSIS_SERVER_URL: ${VITE_ANALYSIS_SERVER_URL:-/api}
-        VITE_POCKETBASE_URL: ${VITE_POCKETBASE_URL:-/pb}
     depends_on:
       backend:
         condition: service_healthy
-      pocketbase:
-        condition: service_started
     restart: unless-stopped
     labels:
       - traefik.enable=true
@@ -41,18 +38,6 @@ services:
       - ./server/data:/app/server/data
       - ./runtime-analysis:/app/runtime-analysis
       - ./models:/app/models:ro
-    networks:
-      - app
-
-  pocketbase:
-    build:
-      context: .
-      dockerfile: Dockerfile.pocketbase
-      args:
-        POCKETBASE_VERSION: ${POCKETBASE_VERSION:-0.26.6}
-    restart: unless-stopped
-    volumes:
-      - ./pb_data:/pb/pb_data
     networks:
       - app
 

@@ -13,11 +13,6 @@ Jika Anda ingin memindahkan proyek ini ke komputer lain atau menjalankannya seca
    npm run dev
    ```
 
-Untuk panduan lebih lengkap dalam Bahasa Indonesia, lihat [PANDUAN_SETUP_v1.md](./docs/PANDUAN_SETUP_v1.md).
-Dokumentasi teknis lainnya tersedia di folder [`/docs`](./docs/):
-- [Laporan Review Kode](./docs/LAPORAN_REVIEW_v1.md)
-- [Detail Skema Database](./docs/SKEMA_DATABASE_v1.md)
-
 ## Project info
 
 **URL**: https://axometrix.com/projects/REPLACE_WITH_PROJECT_ID
@@ -65,7 +60,6 @@ Repo ini sekarang punya artefak deploy container:
 
 - `Dockerfile.frontend`
 - `Dockerfile.backend`
-- `Dockerfile.pocketbase`
 - `docker-compose.yml`
 - `.env.production.example`
 - `deploy/nginx.conf`
@@ -82,10 +76,8 @@ Arsitektur deploy:
 
 - `frontend`: Vite build yang di-serve oleh nginx
 - `backend`: Node + Python + ffmpeg untuk API analisis
-- `pocketbase`: runtime untuk data `productivity_metrics`
 
 Reverse proxy nginx meneruskan:
 
 - `/api/*` ke backend
 - `/analysis-output/*` ke backend
-- `/pb/*` ke PocketBase
