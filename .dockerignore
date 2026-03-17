@@ -7,5 +7,6 @@ dist
 .env.production
 .venv-analysis
 runtime-analysis
+models
 __pycache__
 *.pyc

@@ -19,7 +19,6 @@ RUN python3 -m venv /opt/venv \
   && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
   && /opt/venv/bin/pip install --no-cache-dir -r /app/tools/no_helmet_analysis/requirements.txt
 
-COPY models ./models
 COPY server ./server
 COPY tools ./tools
 

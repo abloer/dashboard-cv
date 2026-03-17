@@ -7,7 +7,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 DEPLOY_USER="${DEPLOY_USER:-sysadm2}"
 DEPLOY_HOST="${DEPLOY_HOST:-103.127.98.173}"
-DEPLOY_PATH="${DEPLOY_PATH:-/srv/apps/vision}"
+DEPLOY_PATH="${DEPLOY_PATH:-/srv/hosting/apps/vision}"
 SSH_KEY="${SSH_KEY:-}"
 DOCKER_COMPOSE_CMD="${DOCKER_COMPOSE_CMD:-sudo docker compose}"
 
