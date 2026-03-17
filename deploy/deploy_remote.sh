@@ -89,7 +89,7 @@ migrate_to_git_repo() {
     mv "\${DEPLOY_PATH}/.env.production" "\${backup_root}/.env.production"
   fi
 
-  rm -rf "\${DEPLOY_PATH}"
+  find "\${DEPLOY_PATH}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
   git clone "\${REPO_URL}" "\${DEPLOY_PATH}"
 
   mkdir -p "\${DEPLOY_PATH}/server"
