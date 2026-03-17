@@ -72,6 +72,44 @@ docker compose --env-file .env.production build
 docker compose --env-file .env.production up -d
 ```
 
+## Git-Based Remote Deploy
+
+Deploy remote sekarang disarankan berbasis `git`, bukan `rsync` code copy. Artinya:
+
+- source of truth tetap repo lokal/GitHub
+- server menyimpan working tree git sehingga versi yang aktif bisa dicek
+- file runtime seperti `.env.production`, `models/`, `server/data`, dan `runtime-analysis` tetap dipertahankan di server
+
+Contoh deploy:
+
+```bash
+SSH_KEY=/path/to/key.pem bash deploy/deploy_remote.sh
+```
+
+Perilaku script:
+
+- clone repo ke server jika path deploy belum berupa git repository
+- atau `fetch + checkout` branch/ref yang dipilih
+- sinkronkan `.env.production`
+- sinkronkan `models/`
+- jalankan `docker compose build` dan `up -d`
+
+Variabel yang bisa dipakai:
+
+- `DEPLOY_USER`
+- `DEPLOY_HOST`
+- `DEPLOY_PATH`
+- `DEPLOY_REF`
+- `REPO_URL`
+- `SYNC_ENV=0|1`
+- `SYNC_MODELS=0|1`
+
+Cek status server:
+
+```bash
+SSH_KEY=/path/to/key.pem bash deploy/check_remote.sh
+```
+
 Arsitektur deploy:
 
 - `frontend`: Vite build yang di-serve oleh nginx

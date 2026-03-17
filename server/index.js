@@ -31,6 +31,9 @@ const defaultRoiConfigPath = path.resolve(
   repoRoot,
   "tools/no_helmet_analysis/area_produksi.roi.json"
 );
+const defaultModelPath = path.resolve(
+  process.env.ANALYSIS_DEFAULT_MODEL_PATH || path.join(repoRoot, "models/detect-construction-safety-best.pt")
+);
 const configuredAnalysisOutputRoot = path.resolve(
   ANALYSIS_OUTPUT_ROOT || path.join(os.tmpdir(), "dashboard-cv-ut-analysis-runs")
 );
@@ -287,6 +290,15 @@ const sanitizeFilename = (filename) =>
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "") || "upload.bin";
 
+const isPathInsideDirectory = (targetPath, baseDirectory) => {
+  const resolvedTarget = path.resolve(targetPath);
+  const resolvedBase = path.resolve(baseDirectory);
+  return (
+    resolvedTarget === resolvedBase ||
+    resolvedTarget.startsWith(`${resolvedBase}${path.sep}`)
+  );
+};
+
 const parseRate = (value) => {
   const [numerator = "0", denominator = "1"] = String(value).split("/");
   const denominatorNumber = Number(denominator) || 1;
@@ -453,6 +465,33 @@ app.post(
     }
   }
 );
+
+app.delete("/analysis/upload-video", (req, res) => {
+  try {
+    ensureAnalysisDirectories();
+    const videoPath = String(req.query.videoPath || "").trim();
+    if (!videoPath) {
+      return res.status(400).json({ ok: false, message: "videoPath is required." });
+    }
+    if (!isPathInsideDirectory(videoPath, uploadRoot)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Only uploaded videos inside the upload directory can be deleted.",
+      });
+    }
+    if (!fileExists(videoPath)) {
+      return res.status(404).json({ ok: false, message: "Uploaded video not found." });
+    }
+
+    fs.unlinkSync(videoPath);
+    return res.json({ ok: true, videoPath });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      message: error?.message || "Uploaded video cleanup failed.",
+    });
+  }
+});
 
 app.post("/analysis/video-preview", async (req, res) => {
   try {
@@ -868,6 +907,7 @@ app.get("/dashboard-summary/source/:id/latest-analysis", (req, res) => {
 app.get("/analysis/no-helmet/defaults", (_req, res) => {
   res.json({
     ok: true,
+    defaultModelPath,
     defaultRoiConfigPath,
     analysisOutputRoot,
     serverPort: Number(PORT),

@@ -18,7 +18,7 @@ export interface NoHelmetModuleConfig {
 export const COMMUNITY_DEMO_PRESET = {
   name: "DetectConstructionSafety",
   repoUrl: "https://github.com/rahilmoosavi/DetectConstructionSafety",
-  suggestedModelPath: "/Users/abloer/my_project/dashboard-cv-ut/models/detect-construction-safety-best.pt",
+  suggestedModelPath: "/app/models/detect-construction-safety-best.pt",
   personLabels: "person",
   helmetLabels: "hardhat",
   violationLabels: "no-hardhat",
@@ -60,9 +60,14 @@ export function readNoHelmetConfig(): NoHelmetModuleConfig {
     }
 
     const parsed = JSON.parse(raw) as Partial<NoHelmetModuleConfig>;
+    const normalizedModelPath =
+      typeof parsed.modelPath === "string" && parsed.modelPath.startsWith("/Users/")
+        ? DEFAULT_NO_HELMET_CONFIG.modelPath
+        : parsed.modelPath;
     return {
       ...DEFAULT_NO_HELMET_CONFIG,
       ...parsed,
+      ...(normalizedModelPath ? { modelPath: normalizedModelPath } : {}),
     };
   } catch (_error) {
     return DEFAULT_NO_HELMET_CONFIG;

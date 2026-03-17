@@ -98,6 +98,7 @@ export interface RunNoHelmetAnalysisResponse {
 
 export interface NoHelmetDefaultsResponse {
   ok: boolean;
+  defaultModelPath: string;
   defaultRoiConfigPath: string;
   analysisOutputRoot: string;
   serverPort: number;
@@ -183,6 +184,17 @@ export async function uploadVideoFile(file: File): Promise<UploadVideoResponse> 
     }
   );
   return parseResponse<UploadVideoResponse>(response);
+}
+
+export async function deleteUploadedVideo(videoPath: string): Promise<void> {
+  const encodedVideoPath = encodeURIComponent(videoPath);
+  const response = await fetch(
+    `${analysisServerBaseUrl}/analysis/upload-video?videoPath=${encodedVideoPath}`,
+    {
+      method: "DELETE",
+    }
+  );
+  await parseResponse<{ ok: boolean; videoPath: string }>(response);
 }
 
 export async function getVideoPreview(

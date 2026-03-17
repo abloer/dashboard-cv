@@ -204,6 +204,7 @@ export default function NoHelmetAnalysis() {
   const [summary, setSummary] = useState<NoHelmetAnalysisSummary | null>(null);
   const [outputDir, setOutputDir] = useState("");
   const [serverDefaults, setServerDefaults] = useState<{
+    defaultModelPath: string;
     defaultRoiConfigPath: string;
     analysisOutputRoot: string;
     uploadRoot: string;
@@ -250,9 +251,22 @@ export default function NoHelmetAnalysis() {
       .then((defaults) => {
         if (!ignore) {
           setServerDefaults({
+            defaultModelPath: defaults.defaultModelPath,
             defaultRoiConfigPath: defaults.defaultRoiConfigPath,
             analysisOutputRoot: defaults.analysisOutputRoot,
             uploadRoot: defaults.uploadRoot,
+          });
+          setFormState((current) => {
+            const legacyLocalPath =
+              current.modelPath.startsWith("/Users/") ||
+              current.modelPath === COMMUNITY_DEMO_PRESET.suggestedModelPath;
+            if (!current.modelPath || legacyLocalPath) {
+              return {
+                ...current,
+                modelPath: defaults.defaultModelPath,
+              };
+            }
+            return current;
           });
         }
       })
@@ -822,7 +836,7 @@ export default function NoHelmetAnalysis() {
                 Repo sumber: {COMMUNITY_DEMO_PRESET.repoUrl}
               </p>
               <p className="text-xs text-muted-foreground break-all">
-                Suggested model path: {COMMUNITY_DEMO_PRESET.suggestedModelPath}
+                Suggested model path: {serverDefaults?.defaultModelPath || COMMUNITY_DEMO_PRESET.suggestedModelPath}
               </p>
               <p className="text-xs text-muted-foreground">
                 Preset ini mengutamakan recall: `conf {COMMUNITY_DEMO_PRESET.confidenceThreshold}`, `frame step {COMMUNITY_DEMO_PRESET.frameStep}`, `on {COMMUNITY_DEMO_PRESET.violationOnFrames}`, `off {COMMUNITY_DEMO_PRESET.cleanOffFrames}`, `imgsz {COMMUNITY_DEMO_PRESET.imageSize}`.
@@ -835,7 +849,7 @@ export default function NoHelmetAnalysis() {
                 <Input
                   value={formState.modelPath}
                   onChange={(event) => handleChange("modelPath", event.target.value)}
-                  placeholder="/absolute/path/to/ppe-model.pt"
+                  placeholder={serverDefaults?.defaultModelPath || "/absolute/path/to/ppe-model.pt"}
                 />
               </div>
 

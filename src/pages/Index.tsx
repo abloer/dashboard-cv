@@ -70,7 +70,7 @@ import type {
   MediaStatus,
   MediaType,
 } from "@/lib/mediaRegistry";
-import { uploadVideoFile } from "@/lib/noHelmetAnalysis";
+import { deleteUploadedVideo, uploadVideoFile } from "@/lib/noHelmetAnalysis";
 
 interface MediaFormState {
   name: string;
@@ -162,6 +162,15 @@ const asPayload = (formState: MediaFormState) => ({
   note: formState.note.trim(),
 });
 
+const humanizeRequestError = (error: unknown) => {
+  const fallback = "Permintaan gagal diproses.";
+  if (!(error instanceof Error)) return fallback;
+  if (error.message === "Failed to fetch" || error.message === "Load failed") {
+    return "Tidak bisa menjangkau service backend dari browser. Periksa container backend dan proxy /api.";
+  }
+  return error.message || fallback;
+};
+
 export default function Index() {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -241,6 +250,7 @@ export default function Index() {
 
   const saveMediaItem = async () => {
     let payload = asPayload(formState);
+    let uploadedVideoPath: string | null = null;
 
     if (!payload.name || !payload.location) {
       toast({
@@ -285,6 +295,7 @@ export default function Index() {
       try {
         setIsUploadingFile(true);
         const uploaded = await uploadVideoFile(selectedUploadFile);
+        uploadedVideoPath = uploaded.videoPath;
         payload = {
           ...payload,
           source: uploaded.videoPath,
@@ -321,10 +332,16 @@ export default function Index() {
       setDialogOpen(false);
       resetForm();
     } catch (mutationError) {
+      if (!editingId && uploadedVideoPath) {
+        try {
+          await deleteUploadedVideo(uploadedVideoPath);
+        } catch (_rollbackError) {
+          // The file can be recovered manually from the upload directory if cleanup fails.
+        }
+      }
       toast({
         title: "Gagal menyimpan source",
-        description:
-          mutationError instanceof Error ? mutationError.message : "Terjadi kesalahan saat menyimpan source.",
+        description: humanizeRequestError(mutationError),
         variant: "destructive",
       });
     } finally {
