@@ -34,9 +34,11 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import {
   analysisServerBaseUrl,
+  getNoHelmetAnalysisJob,
   getNoHelmetDefaults,
   getVideoPreview,
-  runNoHelmetAnalysis,
+  startNoHelmetAnalysis,
+  type NoHelmetAnalysisJob,
   uploadVideoFile,
   type NoHelmetAnalysisEvent,
   type NoHelmetGlobalSummary,
@@ -200,7 +202,9 @@ export default function NoHelmetAnalysis() {
   const { data: mediaItems = [] } = useMediaRegistry();
   const overlayRef = useRef<SVGSVGElement | null>(null);
   const lastAppliedSourceIdRef = useRef<string | null>(null);
+  const terminalJobToastRef = useRef<string | null>(null);
   const savedConfig = readNoHelmetConfig();
+  const [analysisJob, setAnalysisJob] = useState<NoHelmetAnalysisJob | null>(null);
   const [summary, setSummary] = useState<NoHelmetAnalysisSummary | null>(null);
   const [outputDir, setOutputDir] = useState("");
   const [serverDefaults, setServerDefaults] = useState<{
@@ -324,10 +328,11 @@ export default function NoHelmetAnalysis() {
       roiConfigPath: "",
     }));
     setSelectedVideoFile(null);
-    setPreview(null);
-    setSummary(null);
-    setOutputDir("");
-    setStdout("");
+      setPreview(null);
+      setAnalysisJob(null);
+      setSummary(null);
+      setOutputDir("");
+      setStdout("");
     setStderr("");
     lastAppliedSourceIdRef.current = selectedSource.id;
 
@@ -365,6 +370,18 @@ export default function NoHelmetAnalysis() {
     formState.videoPath.trim().length > 0 &&
     formState.modelPath.trim().length > 0 &&
     (hasValidRoi || hasCustomRoiPath);
+  const analysisJobStatusLabel =
+    analysisJob?.status === "queued"
+      ? analysisJob.queuePosition > 0
+        ? `Queued • posisi ${analysisJob.queuePosition}`
+        : "Queued"
+      : analysisJob?.status === "running"
+        ? "Running"
+        : analysisJob?.status === "completed"
+          ? "Completed"
+          : analysisJob?.status === "failed"
+            ? "Failed"
+            : "--";
   const snapshotItems: SnapshotLightboxItem[] =
     summary?.events
       .filter((event) => Boolean(event.snapshotUrl))
@@ -487,6 +504,7 @@ export default function NoHelmetAnalysis() {
     try {
       const response = await uploadVideoFile(selectedVideoFile);
       handleChange("videoPath", response.videoPath);
+      setAnalysisJob(null);
       setSummary(null);
       setOutputDir("");
       setStdout("");
@@ -508,13 +526,97 @@ export default function NoHelmetAnalysis() {
     }
   };
 
+  useEffect(() => {
+    if (!analysisJob || (analysisJob.status !== "queued" && analysisJob.status !== "running")) {
+      return;
+    }
+
+    let cancelled = false;
+    let intervalId: number | null = null;
+
+    const syncJobState = (job: NoHelmetAnalysisJob) => {
+      setAnalysisJob(job);
+      setOutputDir(job.outputDir || "");
+      setStdout(job.stdout || "");
+      setStderr(job.stderr || "");
+
+      if (job.status === "completed") {
+        setSummary(job.summary);
+        setIsAnalyzing(false);
+        if (terminalJobToastRef.current !== job.id) {
+          terminalJobToastRef.current = job.id;
+          toast({
+            title: "Analisis selesai",
+            description: `${job.summary?.event_count ?? 0} event no helmet ditemukan.`,
+          });
+        }
+      } else if (job.status === "failed") {
+        setSummary(null);
+        setIsAnalyzing(false);
+        if (terminalJobToastRef.current !== job.id) {
+          terminalJobToastRef.current = job.id;
+          toast({
+            title: "Analisis gagal",
+            description: job.message || job.stderr || "Job analisis gagal diproses.",
+            variant: "destructive",
+          });
+        }
+      }
+    };
+
+    const pollJob = async () => {
+      try {
+        const response = await getNoHelmetAnalysisJob(analysisJob.id);
+        if (cancelled) return;
+        syncJobState(response.job);
+        if (response.job.status === "completed" || response.job.status === "failed") {
+          if (intervalId !== null) {
+            window.clearInterval(intervalId);
+          }
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const message = humanizeRequestError(error);
+        setIsAnalyzing(false);
+        setStderr(message);
+        if (terminalJobToastRef.current !== `poll:${analysisJob.id}`) {
+          terminalJobToastRef.current = `poll:${analysisJob.id}`;
+          toast({
+            title: "Status job gagal diperbarui",
+            description: message,
+            variant: "destructive",
+          });
+        }
+        if (intervalId !== null) {
+          window.clearInterval(intervalId);
+        }
+      }
+    };
+
+    void pollJob();
+    intervalId = window.setInterval(() => {
+      void pollJob();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [analysisJob?.id, toast]);
+
   const handleRunAnalysis = async () => {
     setIsAnalyzing(true);
     try {
+      setAnalysisJob(null);
+      terminalJobToastRef.current = null;
+      setSummary(null);
+      setOutputDir("");
       setStdout("");
       setStderr("");
 
-      const response = await runNoHelmetAnalysis({
+      const response = await startNoHelmetAnalysis({
         mediaSourceId: selectedSource?.id,
         videoPath: formState.videoPath.trim(),
         modelPath: formState.modelPath.trim(),
@@ -535,24 +637,40 @@ export default function NoHelmetAnalysis() {
         violationLabels: parseCommaSeparated(formState.violationLabels),
       });
 
-      setSummary(response.summary);
+      setAnalysisJob({
+        id: response.jobId,
+        status: response.status,
+        message: response.message,
+        runId: response.runId,
+        outputDir: response.outputDir,
+        createdAt: response.createdAt,
+        startedAt: null,
+        completedAt: null,
+        failedAt: null,
+        mediaSourceId: selectedSource?.id || null,
+        videoPath: formState.videoPath.trim(),
+        stdout: "",
+        stderr: "",
+        summary: null,
+        queuePosition: 0,
+      });
       setOutputDir(response.outputDir);
-      setStdout(response.stdout);
-      setStderr(response.stderr);
+      setStdout("Job analisis sudah dibuat. Tunggu worker menyelesaikan proses dan hasil akan tampil otomatis.");
+      setStderr("");
       toast({
-        title: "Analisis selesai",
-        description: `${response.summary.event_count} event no helmet ditemukan.`,
+        title: "Analisis dimulai",
+        description: response.message,
       });
     } catch (error) {
       const message = humanizeRequestError(error);
+      setIsAnalyzing(false);
       setStderr(message);
+      setAnalysisJob(null);
       toast({
         title: "Analisis gagal",
         description: message,
         variant: "destructive",
       });
-    } finally {
-      setIsAnalyzing(false);
     }
   };
 
@@ -964,6 +1082,24 @@ export default function NoHelmetAnalysis() {
             <div className="rounded-lg border bg-secondary/20 p-4 space-y-2">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">Output Directory</p>
               <p className="text-sm font-medium break-all">{outputDir || serverDefaults?.analysisOutputRoot || "-"}</p>
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <Badge
+                  variant={
+                    analysisJob?.status === "completed"
+                      ? "default"
+                      : analysisJob?.status === "failed"
+                        ? "destructive"
+                        : "secondary"
+                  }
+                >
+                  {analysisJobStatusLabel}
+                </Badge>
+                {analysisJob?.runId ? <Badge variant="outline">{analysisJob.runId}</Badge> : null}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {analysisJob?.message ||
+                  "Run analisis sekarang memakai background job. Hasil akan muncul otomatis saat worker selesai."}
+              </p>
             </div>
 
             <Button
@@ -972,7 +1108,7 @@ export default function NoHelmetAnalysis() {
               className="gap-2 w-full"
             >
               {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <HardHat className="w-4 h-4" />}
-              {isAnalyzing ? "Menganalisis..." : "Run No Helmet Analysis"}
+              {isAnalyzing ? "Worker sedang berjalan..." : "Run No Helmet Analysis"}
             </Button>
 
             <div className="grid gap-4">

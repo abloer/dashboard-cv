@@ -96,6 +96,41 @@ export interface RunNoHelmetAnalysisResponse {
   stderr: string;
 }
 
+export type NoHelmetAnalysisJobStatus = "queued" | "running" | "completed" | "failed";
+
+export interface NoHelmetAnalysisJob {
+  id: string;
+  status: NoHelmetAnalysisJobStatus;
+  message: string;
+  runId: string;
+  outputDir: string;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  failedAt: string | null;
+  mediaSourceId: string | null;
+  videoPath: string;
+  stdout: string;
+  stderr: string;
+  summary: NoHelmetAnalysisSummary | null;
+  queuePosition: number;
+}
+
+export interface StartNoHelmetAnalysisResponse {
+  ok: boolean;
+  jobId: string;
+  status: NoHelmetAnalysisJobStatus;
+  message: string;
+  runId: string;
+  outputDir: string;
+  createdAt: string;
+}
+
+export interface NoHelmetAnalysisJobResponse {
+  ok: boolean;
+  job: NoHelmetAnalysisJob;
+}
+
 export interface NoHelmetDefaultsResponse {
   ok: boolean;
   defaultModelPath: string;
@@ -157,9 +192,9 @@ export async function getNoHelmetDefaults(): Promise<NoHelmetDefaultsResponse> {
   return parseResponse<NoHelmetDefaultsResponse>(response);
 }
 
-export async function runNoHelmetAnalysis(
+export async function startNoHelmetAnalysis(
   payload: RunNoHelmetAnalysisPayload
-): Promise<RunNoHelmetAnalysisResponse> {
+): Promise<StartNoHelmetAnalysisResponse> {
   const response = await fetch(`${analysisServerBaseUrl}/analysis/no-helmet`, {
     method: "POST",
     headers: {
@@ -167,7 +202,14 @@ export async function runNoHelmetAnalysis(
     },
     body: JSON.stringify(payload),
   });
-  return parseResponse<RunNoHelmetAnalysisResponse>(response);
+  return parseResponse<StartNoHelmetAnalysisResponse>(response);
+}
+
+export async function getNoHelmetAnalysisJob(
+  jobId: string
+): Promise<NoHelmetAnalysisJobResponse> {
+  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-helmet/jobs/${jobId}`);
+  return parseResponse<NoHelmetAnalysisJobResponse>(response);
 }
 
 export async function uploadVideoFile(file: File): Promise<UploadVideoResponse> {

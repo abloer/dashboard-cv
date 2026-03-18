@@ -84,6 +84,35 @@ const analysisPythonCommand = resolvePythonCommand();
 const VALID_ANALYTICS = new Set(["HSE", "PPE", "Operations", "Fleet & KPI"]);
 const VALID_EXECUTION_MODES = new Set(["manual", "scheduled", "continuous"]);
 const VALID_MONITORING_STATUSES = new Set(["idle", "running", "paused"]);
+const ANALYSIS_JOB_TERMINAL_STATUSES = new Set(["completed", "failed"]);
+const MAX_ANALYSIS_JOB_RETENTION = 50;
+const analysisJobs = new Map();
+const analysisJobQueue = [];
+let activeAnalysisJobId = null;
+
+const noHelmetPayloadSchema = z.object({
+  mediaSourceId: z.string().trim().min(1).optional(),
+  videoPath: z.string().trim().min(1),
+  modelPath: z.string().trim().min(1),
+  roiConfigPath: z.string().trim().min(1).optional(),
+  roiId: z.string().trim().min(1).optional(),
+  roiNormalized: z.boolean().optional(),
+  roiPolygon: z
+    .array(z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]))
+    .min(3)
+    .optional(),
+  confidenceThreshold: z.number().min(0).max(1).optional(),
+  iouThreshold: z.number().min(0).max(1).optional(),
+  topRatio: z.number().min(0).max(1).optional(),
+  helmetOverlapThreshold: z.number().min(0).max(1).optional(),
+  violationOnFrames: z.number().int().positive().optional(),
+  cleanOffFrames: z.number().int().positive().optional(),
+  frameStep: z.number().int().positive().optional(),
+  imageSize: z.number().int().positive().optional(),
+  personLabels: z.array(z.string().trim().min(1)).optional(),
+  helmetLabels: z.array(z.string().trim().min(1)).optional(),
+  violationLabels: z.array(z.string().trim().min(1)).optional(),
+});
 
 app.use("/analysis-output", express.static(analysisOutputRoot));
 
@@ -415,6 +444,258 @@ const buildLatestAnalysisSummary = (req, run) => {
       ? latestRunSummary.events.slice(0, 6)
       : [],
   };
+};
+
+const sanitizeAnalysisJobForResponse = (req, job) => {
+  if (!job) return null;
+
+  const queueIndex =
+    job.status === "queued" ? analysisJobQueue.findIndex((item) => item === job.id) : -1;
+
+  return {
+    ok: true,
+    job: {
+      id: job.id,
+      status: job.status,
+      message: job.message,
+      runId: job.runId,
+      outputDir: job.outputDir,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt || null,
+      completedAt: job.completedAt || null,
+      failedAt: job.failedAt || null,
+      mediaSourceId: job.mediaSourceId || null,
+      videoPath: job.videoPath,
+      stdout: job.stdout || "",
+      stderr: job.stderr || "",
+      summary: job.summary ? enrichSummary(req, job.summary) : null,
+      queuePosition: queueIndex >= 0 ? queueIndex + 1 : 0,
+    },
+  };
+};
+
+const pruneAnalysisJobs = () => {
+  const removableJobs = Array.from(analysisJobs.values())
+    .filter((job) => ANALYSIS_JOB_TERMINAL_STATUSES.has(job.status))
+    .sort(
+      (left, right) =>
+        new Date(right.completedAt || right.failedAt || right.createdAt).getTime() -
+        new Date(left.completedAt || left.failedAt || left.createdAt).getTime()
+    );
+
+  removableJobs.slice(MAX_ANALYSIS_JOB_RETENTION).forEach((job) => {
+    analysisJobs.delete(job.id);
+  });
+};
+
+const buildNoHelmetAnalysisJob = (payload) => {
+  const {
+    mediaSourceId,
+    videoPath,
+    modelPath,
+    roiConfigPath,
+    roiId,
+    roiNormalized,
+    roiPolygon,
+    confidenceThreshold,
+    iouThreshold,
+    topRatio,
+    helmetOverlapThreshold,
+    violationOnFrames,
+    cleanOffFrames,
+    frameStep,
+    imageSize,
+    personLabels,
+    helmetLabels,
+    violationLabels,
+  } = payload;
+
+  if (!fileExists(videoPath)) {
+    const error = new Error("Video path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!fileExists(modelPath)) {
+    const error = new Error("Model path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!fileExists(analysisScriptPath)) {
+    const error = new Error("Analysis script not found.");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const jobId = `job-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const runId = `run-${Date.now()}`;
+  const outputDir = path.join(analysisOutputRoot, runId);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const resolvedRoiConfigPath = roiPolygon
+    ? path.join(outputDir, "roi.generated.json")
+    : roiConfigPath || defaultRoiConfigPath;
+
+  if (roiPolygon) {
+    fs.writeFileSync(
+      resolvedRoiConfigPath,
+      JSON.stringify(
+        {
+          roi_id: roiId || "roi-dashboard",
+          normalized: roiNormalized !== false,
+          polygon: roiPolygon,
+        },
+        null,
+        2
+      )
+    );
+  }
+  if (!roiPolygon && !fileExists(resolvedRoiConfigPath)) {
+    const error = new Error("ROI config path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const commandArgs = [
+    analysisScriptPath,
+    "--video-path",
+    videoPath,
+    "--roi-config-path",
+    resolvedRoiConfigPath,
+    "--output-dir",
+    outputDir,
+    "--model-path",
+    modelPath,
+  ];
+
+  const appendNumberArg = (flag, value) => {
+    if (typeof value === "number") {
+      commandArgs.push(flag, String(value));
+    }
+  };
+
+  appendNumberArg("--confidence-threshold", confidenceThreshold);
+  appendNumberArg("--iou-threshold", iouThreshold);
+  appendNumberArg("--top-ratio", topRatio);
+  appendNumberArg("--helmet-overlap-threshold", helmetOverlapThreshold);
+  appendNumberArg("--violation-on-frames", violationOnFrames);
+  appendNumberArg("--clean-off-frames", cleanOffFrames);
+  appendNumberArg("--frame-step", frameStep);
+  appendNumberArg("--image-size", imageSize);
+
+  (personLabels || []).forEach((label) => {
+    commandArgs.push("--person-label", label);
+  });
+  (helmetLabels || []).forEach((label) => {
+    commandArgs.push("--helmet-label", label);
+  });
+  (violationLabels || []).forEach((label) => {
+    commandArgs.push("--violation-label", label);
+  });
+
+  return {
+    id: jobId,
+    runId,
+    mediaSourceId: mediaSourceId || null,
+    videoPath,
+    outputDir,
+    commandArgs,
+    status: "queued",
+    message: "Job analisis masuk antrean dan menunggu worker.",
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    completedAt: null,
+    failedAt: null,
+    stdout: "",
+    stderr: "",
+    summary: null,
+  };
+};
+
+const executeNoHelmetAnalysisJob = async (job) => {
+  job.status = "running";
+  job.message = "Analisis sedang berjalan di background worker.";
+  job.startedAt = new Date().toISOString();
+
+  try {
+    const { stdout, stderr } = await runAnalysisCommand(job.commandArgs);
+    const summaryPath = path.join(job.outputDir, "summary.json");
+    if (!fileExists(summaryPath)) {
+      const error = new Error("Analysis finished without summary.json output.");
+      error.stdout = stdout;
+      error.stderr = stderr;
+      throw error;
+    }
+
+    const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
+    const mediaRegistry = readMediaRegistry();
+    const mediaSource =
+      mediaRegistry.find((item) => item.id === job.mediaSourceId) ||
+      mediaRegistry.find((item) => item.source === job.videoPath) ||
+      null;
+
+    appendAnalysisHistory({
+      id: job.runId,
+      analysisType: "no_helmet",
+      mediaSourceId: mediaSource?.id || null,
+      sourceName: mediaSource?.name || path.basename(job.videoPath),
+      location: mediaSource?.location || null,
+      videoPath: job.videoPath,
+      outputDir: job.outputDir,
+      eventCount: Number(summary.event_count || 0),
+      violatorCount: Number(summary.global_summary?.violator_count || 0),
+      stableDetectedTrackCount: Number(summary.global_summary?.stable_detected_track_count || 0),
+      rawDetectedTrackCount: Number(summary.global_summary?.detected_track_count || 0),
+      createdAt: new Date().toISOString(),
+    });
+
+    job.status = "completed";
+    job.message = `Analisis selesai dengan ${Number(summary.event_count || 0)} event.`;
+    job.completedAt = new Date().toISOString();
+    job.stdout = stdout || "";
+    job.stderr = stderr || "";
+    job.summary = summary;
+  } catch (error) {
+    job.status = "failed";
+    job.message = error?.message || "Analysis failed";
+    job.failedAt = new Date().toISOString();
+    job.stdout = error?.stdout || "";
+    job.stderr = error?.stderr || error?.message || "";
+  }
+};
+
+const processNextAnalysisJob = () => {
+  if (activeAnalysisJobId || analysisJobQueue.length === 0) {
+    return;
+  }
+
+  const nextJobId = analysisJobQueue.shift();
+  if (!nextJobId) {
+    return;
+  }
+
+  const job = analysisJobs.get(nextJobId);
+  if (!job || job.status !== "queued") {
+    processNextAnalysisJob();
+    return;
+  }
+
+  activeAnalysisJobId = nextJobId;
+
+  executeNoHelmetAnalysisJob(job)
+    .catch(() => {
+      // Execution errors are already captured into the job state.
+    })
+    .finally(() => {
+      activeAnalysisJobId = null;
+      pruneAnalysisJobs();
+      processNextAnalysisJob();
+    });
+};
+
+const enqueueAnalysisJob = (job) => {
+  analysisJobs.set(job.id, job);
+  analysisJobQueue.push(job.id);
+  processNextAnalysisJob();
+  return job;
 };
 
 app.post(
@@ -917,31 +1198,7 @@ app.get("/analysis/no-helmet/defaults", (_req, res) => {
 
 app.post("/analysis/no-helmet", async (req, res) => {
   try {
-    const payloadSchema = z.object({
-      mediaSourceId: z.string().trim().min(1).optional(),
-      videoPath: z.string().trim().min(1),
-      modelPath: z.string().trim().min(1),
-      roiConfigPath: z.string().trim().min(1).optional(),
-      roiId: z.string().trim().min(1).optional(),
-      roiNormalized: z.boolean().optional(),
-      roiPolygon: z
-        .array(z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]))
-        .min(3)
-        .optional(),
-      confidenceThreshold: z.number().min(0).max(1).optional(),
-      iouThreshold: z.number().min(0).max(1).optional(),
-      topRatio: z.number().min(0).max(1).optional(),
-      helmetOverlapThreshold: z.number().min(0).max(1).optional(),
-      violationOnFrames: z.number().int().positive().optional(),
-      cleanOffFrames: z.number().int().positive().optional(),
-      frameStep: z.number().int().positive().optional(),
-      imageSize: z.number().int().positive().optional(),
-      personLabels: z.array(z.string().trim().min(1)).optional(),
-      helmetLabels: z.array(z.string().trim().min(1)).optional(),
-      violationLabels: z.array(z.string().trim().min(1)).optional(),
-    });
-
-    const parsed = payloadSchema.safeParse(req.body || {});
+    const parsed = noHelmetPayloadSchema.safeParse(req.body || {});
     if (!parsed.success) {
       return res.status(400).json({
         ok: false,
@@ -950,146 +1207,33 @@ app.post("/analysis/no-helmet", async (req, res) => {
       });
     }
 
-    const {
-      mediaSourceId,
-      videoPath,
-      modelPath,
-      roiConfigPath,
-      roiId,
-      roiNormalized,
-      roiPolygon,
-      confidenceThreshold,
-      iouThreshold,
-      topRatio,
-      helmetOverlapThreshold,
-      violationOnFrames,
-      cleanOffFrames,
-      frameStep,
-      imageSize,
-      personLabels,
-      helmetLabels,
-      violationLabels,
-    } = parsed.data;
-
-    if (!fileExists(videoPath)) {
-      return res.status(400).json({ ok: false, message: "Video path not found." });
-    }
-    if (!fileExists(modelPath)) {
-      return res.status(400).json({ ok: false, message: "Model path not found." });
-    }
-    if (!fileExists(analysisScriptPath)) {
-      return res.status(500).json({ ok: false, message: "Analysis script not found." });
-    }
-
-    const runId = `run-${Date.now()}`;
-    const outputDir = path.join(analysisOutputRoot, runId);
-    fs.mkdirSync(outputDir, { recursive: true });
-    const resolvedRoiConfigPath = roiPolygon
-      ? path.join(outputDir, "roi.generated.json")
-      : roiConfigPath || defaultRoiConfigPath;
-
-    if (roiPolygon) {
-      fs.writeFileSync(
-        resolvedRoiConfigPath,
-        JSON.stringify(
-          {
-            roi_id: roiId || "roi-dashboard",
-            normalized: roiNormalized !== false,
-            polygon: roiPolygon,
-          },
-          null,
-          2
-        )
-      );
-    }
-    if (!roiPolygon && !fileExists(resolvedRoiConfigPath)) {
-      return res.status(400).json({ ok: false, message: "ROI config path not found." });
-    }
-
-    const commandArgs = [
-      analysisScriptPath,
-      "--video-path",
-      videoPath,
-      "--roi-config-path",
-      resolvedRoiConfigPath,
-      "--output-dir",
-      outputDir,
-      "--model-path",
-      modelPath,
-    ];
-
-    const appendNumberArg = (flag, value) => {
-      if (typeof value === "number") {
-        commandArgs.push(flag, String(value));
-      }
-    };
-
-    appendNumberArg("--confidence-threshold", confidenceThreshold);
-    appendNumberArg("--iou-threshold", iouThreshold);
-    appendNumberArg("--top-ratio", topRatio);
-    appendNumberArg("--helmet-overlap-threshold", helmetOverlapThreshold);
-    appendNumberArg("--violation-on-frames", violationOnFrames);
-    appendNumberArg("--clean-off-frames", cleanOffFrames);
-    appendNumberArg("--frame-step", frameStep);
-    appendNumberArg("--image-size", imageSize);
-
-    (personLabels || []).forEach((label) => {
-      commandArgs.push("--person-label", label);
-    });
-    (helmetLabels || []).forEach((label) => {
-      commandArgs.push("--helmet-label", label);
-    });
-    (violationLabels || []).forEach((label) => {
-      commandArgs.push("--violation-label", label);
-    });
-
-    const { stdout, stderr } = await runAnalysisCommand(commandArgs);
-    const summaryPath = path.join(outputDir, "summary.json");
-    if (!fileExists(summaryPath)) {
-      return res.status(500).json({
-        ok: false,
-        message: "Analysis finished without summary.json output.",
-        stdout,
-        stderr,
-      });
-    }
-
-    const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
-    const mediaRegistry = readMediaRegistry();
-    const mediaSource =
-      mediaRegistry.find((item) => item.id === mediaSourceId) ||
-      mediaRegistry.find((item) => item.source === videoPath) ||
-      null;
-    appendAnalysisHistory({
-      id: runId,
-      analysisType: "no_helmet",
-      mediaSourceId: mediaSource?.id || null,
-      sourceName: mediaSource?.name || path.basename(videoPath),
-      location: mediaSource?.location || null,
-      videoPath,
-      outputDir,
-      eventCount: Number(summary.event_count || 0),
-      violatorCount: Number(summary.global_summary?.violator_count || 0),
-      stableDetectedTrackCount: Number(summary.global_summary?.stable_detected_track_count || 0),
-      rawDetectedTrackCount: Number(summary.global_summary?.detected_track_count || 0),
-      createdAt: new Date().toISOString(),
-    });
-    return res.json({
+    const job = enqueueAnalysisJob(buildNoHelmetAnalysisJob(parsed.data));
+    return res.status(202).json({
       ok: true,
-      runId,
-      outputDir,
-      summary: enrichSummary(req, summary),
-      stdout,
-      stderr,
+      jobId: job.id,
+      status: job.status,
+      message: job.message,
+      runId: job.runId,
+      outputDir: job.outputDir,
+      createdAt: job.createdAt,
     });
   } catch (error) {
-    return res.status(500).json({
+    return res.status(error?.statusCode || 500).json({
       ok: false,
       message: error?.message || "Analysis failed",
       stdout: error?.stdout || "",
       stderr: error?.stderr || "",
     });
   }
+});
+
+app.get("/analysis/no-helmet/jobs/:id", (req, res) => {
+  const job = analysisJobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({ ok: false, message: "Analysis job not found." });
+  }
+
+  return res.json(sanitizeAnalysisJobForResponse(req, job));
 });
 
 app.post("/sync", async (req, res) => {
