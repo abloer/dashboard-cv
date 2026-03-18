@@ -78,7 +78,7 @@ Deploy remote sekarang disarankan berbasis `git`, bukan `rsync` code copy. Artin
 
 - source of truth tetap repo lokal/GitHub
 - server menyimpan working tree git sehingga versi yang aktif bisa dicek
-- file runtime seperti `.env.production`, `models/`, `server/data`, dan `runtime-analysis` tetap dipertahankan di server
+- file runtime dipisahkan dari folder release dan dipertahankan di path persistence server
 
 Contoh deploy:
 
@@ -91,7 +91,8 @@ Perilaku script:
 - clone repo ke server jika path deploy belum berupa git repository
 - atau `fetch + checkout` branch/ref yang dipilih
 - sinkronkan `.env.production`
-- sinkronkan `models/`
+- sinkronkan `models/` ke path persistence
+- mount `server/data` dan `runtime-analysis` dari path persistence terpisah
 - jalankan `docker compose build` dan `up -d`
 
 Variabel yang bisa dipakai:
@@ -103,12 +104,28 @@ Variabel yang bisa dipakai:
 - `REPO_URL`
 - `SYNC_ENV=0|1`
 - `SYNC_MODELS=0|1`
+- `PERSISTENCE_ROOT`
+- `HOST_SERVER_DATA_DIR`
+- `HOST_RUNTIME_ANALYSIS_DIR`
+- `HOST_MODELS_DIR`
 
 Cek status server:
 
 ```bash
 SSH_KEY=/path/to/key.pem bash deploy/check_remote.sh
 ```
+
+Pulihkan registry `Media Sources` dan `analysis-history` dari file runtime yang masih ada:
+
+```bash
+SSH_KEY=/path/to/key.pem bash deploy/recover_remote.sh
+```
+
+Contoh path persistence production:
+
+- `HOST_SERVER_DATA_DIR=/srv/hosting/apps/vision-data/server-data`
+- `HOST_RUNTIME_ANALYSIS_DIR=/srv/hosting/apps/vision-data/runtime-analysis`
+- `HOST_MODELS_DIR=/srv/hosting/apps/vision-data/models`
 
 Arsitektur deploy:
 

@@ -8,8 +8,12 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEPLOY_USER="${DEPLOY_USER:-sysadm2}"
 DEPLOY_HOST="${DEPLOY_HOST:-103.127.98.173}"
 DEPLOY_PATH="${DEPLOY_PATH:-/srv/hosting/apps/vision}"
+PERSISTENCE_ROOT="${PERSISTENCE_ROOT:-${DEPLOY_PATH}-data}"
+HOST_SERVER_DATA_DIR="${HOST_SERVER_DATA_DIR:-${PERSISTENCE_ROOT}/server-data}"
+HOST_RUNTIME_ANALYSIS_DIR="${HOST_RUNTIME_ANALYSIS_DIR:-${PERSISTENCE_ROOT}/runtime-analysis}"
+HOST_MODELS_DIR="${HOST_MODELS_DIR:-${PERSISTENCE_ROOT}/models}"
 SSH_KEY="${SSH_KEY:-}"
-DOCKER_COMPOSE_CMD="${DOCKER_COMPOSE_CMD:-sudo docker compose}"
+DOCKER_COMPOSE_CMD="${DOCKER_COMPOSE_CMD:-sudo --preserve-env=HOST_SERVER_DATA_DIR,HOST_RUNTIME_ANALYSIS_DIR,HOST_MODELS_DIR docker compose}"
 SYNC_ENV="${SYNC_ENV:-1}"
 SYNC_MODELS="${SYNC_MODELS:-1}"
 
@@ -44,9 +48,10 @@ fi
 echo "Deploy target: ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}"
 echo "Repository: ${REPO_URL}"
 echo "Ref: ${DEPLOY_REF}"
+echo "Persistence root: ${PERSISTENCE_ROOT}"
 
 ssh -i "${SSH_KEY}" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-  "mkdir -p '$(dirname "${DEPLOY_PATH}")' '${DEPLOY_PATH}' '${DEPLOY_PATH}/runtime-analysis' '${DEPLOY_PATH}/server/data' '${DEPLOY_PATH}/models'"
+  "sudo mkdir -p '$(dirname "${DEPLOY_PATH}")' '${DEPLOY_PATH}' '${PERSISTENCE_ROOT}' '${HOST_RUNTIME_ANALYSIS_DIR}' '${HOST_SERVER_DATA_DIR}' '${HOST_MODELS_DIR}' && sudo chown -R ${DEPLOY_USER}:${DEPLOY_USER} '${DEPLOY_PATH}' '${PERSISTENCE_ROOT}'"
 
 if [[ "${SYNC_ENV}" == "1" ]]; then
   echo "Syncing .env.production"
@@ -57,7 +62,7 @@ if [[ "${SYNC_MODELS}" == "1" && -d "${PROJECT_ROOT}/models" ]]; then
   echo "Syncing models/"
   rsync -az --delete \
     -e "ssh -i ${SSH_KEY}" \
-    "${PROJECT_ROOT}/models/" "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/models/"
+    "${PROJECT_ROOT}/models/" "${DEPLOY_USER}@${DEPLOY_HOST}:${HOST_MODELS_DIR}/"
 fi
 
 ssh -i "${SSH_KEY}" "${DEPLOY_USER}@${DEPLOY_HOST}" <<EOF
@@ -67,22 +72,36 @@ DEPLOY_PATH="${DEPLOY_PATH}"
 REPO_URL="${REPO_URL}"
 DEPLOY_REF="${DEPLOY_REF}"
 DOCKER_COMPOSE_CMD="${DOCKER_COMPOSE_CMD}"
+HOST_SERVER_DATA_DIR="${HOST_SERVER_DATA_DIR}"
+HOST_RUNTIME_ANALYSIS_DIR="${HOST_RUNTIME_ANALYSIS_DIR}"
+HOST_MODELS_DIR="${HOST_MODELS_DIR}"
+
+migrate_persistent_dir() {
+  local legacy_path="\$1"
+  local persistent_path="\$2"
+  mkdir -p "\${persistent_path}"
+  if [[ -d "\${legacy_path}" ]] && find "\${legacy_path}" -mindepth 1 -print -quit >/dev/null 2>&1; then
+    cp -a "\${legacy_path}/." "\${persistent_path}/"
+  fi
+}
 
 migrate_to_git_repo() {
   local backup_root
   backup_root="\$(mktemp -d)"
 
-  if [[ -d "\${DEPLOY_PATH}/runtime-analysis" ]]; then
-    mv "\${DEPLOY_PATH}/runtime-analysis" "\${backup_root}/runtime-analysis"
+  if [[ -d "\${HOST_RUNTIME_ANALYSIS_DIR}" ]]; then
+    mkdir -p "\${backup_root}/runtime-analysis"
+    cp -a "\${HOST_RUNTIME_ANALYSIS_DIR}/." "\${backup_root}/runtime-analysis/" 2>/dev/null || true
   fi
 
-  if [[ -d "\${DEPLOY_PATH}/server/data" ]]; then
-    mkdir -p "\${backup_root}/server"
-    mv "\${DEPLOY_PATH}/server/data" "\${backup_root}/server/data"
+  if [[ -d "\${HOST_SERVER_DATA_DIR}" ]]; then
+    mkdir -p "\${backup_root}/server/data"
+    cp -a "\${HOST_SERVER_DATA_DIR}/." "\${backup_root}/server/data/" 2>/dev/null || true
   fi
 
-  if [[ -d "\${DEPLOY_PATH}/models" ]]; then
-    mv "\${DEPLOY_PATH}/models" "\${backup_root}/models"
+  if [[ -d "\${HOST_MODELS_DIR}" ]]; then
+    mkdir -p "\${backup_root}/models"
+    cp -a "\${HOST_MODELS_DIR}/." "\${backup_root}/models/" 2>/dev/null || true
   fi
 
   if [[ -f "\${DEPLOY_PATH}/.env.production" ]]; then
@@ -94,22 +113,18 @@ migrate_to_git_repo() {
 
   mkdir -p "\${DEPLOY_PATH}/server"
 
+  mkdir -p "\${HOST_RUNTIME_ANALYSIS_DIR}" "\${HOST_SERVER_DATA_DIR}" "\${HOST_MODELS_DIR}"
+
   if [[ -d "\${backup_root}/runtime-analysis" ]]; then
-    mv "\${backup_root}/runtime-analysis" "\${DEPLOY_PATH}/runtime-analysis"
-  else
-    mkdir -p "\${DEPLOY_PATH}/runtime-analysis"
+    cp -a "\${backup_root}/runtime-analysis/." "\${HOST_RUNTIME_ANALYSIS_DIR}/"
   fi
 
   if [[ -d "\${backup_root}/server/data" ]]; then
-    mv "\${backup_root}/server/data" "\${DEPLOY_PATH}/server/data"
-  else
-    mkdir -p "\${DEPLOY_PATH}/server/data"
+    cp -a "\${backup_root}/server/data/." "\${HOST_SERVER_DATA_DIR}/"
   fi
 
   if [[ -d "\${backup_root}/models" ]]; then
-    mv "\${backup_root}/models" "\${DEPLOY_PATH}/models"
-  else
-    mkdir -p "\${DEPLOY_PATH}/models"
+    cp -a "\${backup_root}/models/." "\${HOST_MODELS_DIR}/"
   fi
 
   if [[ -f "\${backup_root}/.env.production" ]]; then
@@ -137,11 +152,28 @@ fi
 
 checkout_ref
 
+migrate_persistent_dir "\${DEPLOY_PATH}/runtime-analysis" "\${HOST_RUNTIME_ANALYSIS_DIR}"
+migrate_persistent_dir "\${DEPLOY_PATH}/server/data" "\${HOST_SERVER_DATA_DIR}"
+migrate_persistent_dir "\${DEPLOY_PATH}/models" "\${HOST_MODELS_DIR}"
+
 cd "\${DEPLOY_PATH}"
+HOST_SERVER_DATA_DIR="\${HOST_SERVER_DATA_DIR}" \
+HOST_RUNTIME_ANALYSIS_DIR="\${HOST_RUNTIME_ANALYSIS_DIR}" \
+HOST_MODELS_DIR="\${HOST_MODELS_DIR}" \
 \${DOCKER_COMPOSE_CMD} --env-file .env.production build
+HOST_SERVER_DATA_DIR="\${HOST_SERVER_DATA_DIR}" \
+HOST_RUNTIME_ANALYSIS_DIR="\${HOST_RUNTIME_ANALYSIS_DIR}" \
+HOST_MODELS_DIR="\${HOST_MODELS_DIR}" \
 \${DOCKER_COMPOSE_CMD} --env-file .env.production up -d
+HOST_SERVER_DATA_DIR="\${HOST_SERVER_DATA_DIR}" \
+HOST_RUNTIME_ANALYSIS_DIR="\${HOST_RUNTIME_ANALYSIS_DIR}" \
+HOST_MODELS_DIR="\${HOST_MODELS_DIR}" \
 \${DOCKER_COMPOSE_CMD} --env-file .env.production ps
 echo "--- deployed revision ---"
 git rev-parse HEAD
 git log --oneline -n 1
+echo "--- persistence paths ---"
+echo "HOST_SERVER_DATA_DIR=\${HOST_SERVER_DATA_DIR}"
+echo "HOST_RUNTIME_ANALYSIS_DIR=\${HOST_RUNTIME_ANALYSIS_DIR}"
+echo "HOST_MODELS_DIR=\${HOST_MODELS_DIR}"
 EOF
