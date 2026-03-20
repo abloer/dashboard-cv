@@ -40,12 +40,14 @@ const configuredAnalysisOutputRoot = path.resolve(
 const analysisVenvPythonPath = path.resolve(repoRoot, ".venv-analysis/bin/python");
 const mediaRegistryPath = path.resolve(repoRoot, "server/data/media-sources.json");
 const analysisHistoryPath = path.resolve(repoRoot, "server/data/analysis-history.json");
+const moduleConfigsPath = path.resolve(repoRoot, "server/data/module-configs.json");
 fs.mkdirSync(configuredAnalysisOutputRoot, { recursive: true });
 const analysisOutputRoot = fs.realpathSync.native(configuredAnalysisOutputRoot);
 const uploadRoot = path.join(analysisOutputRoot, "uploads");
 const previewRoot = path.join(analysisOutputRoot, "previews");
 fs.mkdirSync(path.dirname(mediaRegistryPath), { recursive: true });
 fs.mkdirSync(path.dirname(analysisHistoryPath), { recursive: true });
+fs.mkdirSync(path.dirname(moduleConfigsPath), { recursive: true });
 fs.mkdirSync(uploadRoot, { recursive: true });
 fs.mkdirSync(previewRoot, { recursive: true });
 
@@ -57,6 +59,10 @@ if (!fs.existsSync(mediaRegistryPath)) {
 
 if (!fs.existsSync(analysisHistoryPath)) {
   fs.writeFileSync(analysisHistoryPath, JSON.stringify([], null, 2));
+}
+
+if (!fs.existsSync(moduleConfigsPath)) {
+  fs.writeFileSync(moduleConfigsPath, JSON.stringify({}, null, 2));
 }
 
 const resolvePythonCommand = () => {
@@ -113,6 +119,79 @@ const noHelmetPayloadSchema = z.object({
   helmetLabels: z.array(z.string().trim().min(1)).optional(),
   violationLabels: z.array(z.string().trim().min(1)).optional(),
 });
+
+const noSafetyVestConfigSchema = z.object({
+  modelPath: z.string().trim().min(1),
+  roiId: z.string().trim().min(1),
+  roiConfigPath: z.string(),
+  confidenceThreshold: z.string().trim().min(1),
+  iouThreshold: z.string().trim().min(1),
+  vestLabels: z.string().trim().min(1),
+  violationLabels: z.string().trim().min(1),
+  violationOnFrames: z.string().trim().min(1),
+  cleanOffFrames: z.string().trim().min(1),
+  frameStep: z.string().trim().min(1),
+  imageSize: z.string().trim().min(1),
+  operationalNotes: z.string(),
+});
+
+const safetyRulesConfigSchema = z.object({
+  ruleProfileName: z.string().trim().min(1),
+  modelPath: z.string().trim().min(1),
+  detectorLabels: z.string().trim().min(1),
+  violationLabels: z.string().trim().min(1),
+  confidenceThreshold: z.string().trim().min(1),
+  iouThreshold: z.string().trim().min(1),
+  frameStep: z.string().trim().min(1),
+  imageSize: z.string().trim().min(1),
+  restrictedZones: z.string().trim().min(1),
+  requiredPpe: z.string().trim().min(1),
+  maxPeopleInZone: z.string().trim().min(1),
+  alertCooldownSeconds: z.string().trim().min(1),
+  supervisorEscalationNote: z.string().trim().min(1),
+  incidentNarrativeTemplate: z.string().trim().min(1),
+});
+
+const moduleConfigSchemas = {
+  "no-safety-vest": noSafetyVestConfigSchema,
+  "safety-rules": safetyRulesConfigSchema,
+};
+
+const defaultModuleConfigs = {
+  "no-safety-vest": {
+    modelPath: "/app/models/detect-construction-safety-best.pt",
+    roiId: "area-produksi-vest",
+    roiConfigPath: "",
+    confidenceThreshold: "0.20",
+    iouThreshold: "0.30",
+    vestLabels: "safety-vest, vest",
+    violationLabels: "no-safety-vest, no-vest",
+    violationOnFrames: "2",
+    cleanOffFrames: "2",
+    frameStep: "5",
+    imageSize: "960",
+    operationalNotes:
+      "Gunakan modul ini untuk inspeksi rompi keselamatan pada area produksi, loading point, dan jalur pejalan kaki.",
+  },
+  "safety-rules": {
+    ruleProfileName: "General Site Safety",
+    modelPath: "/app/models/detect-construction-safety-best.pt",
+    detectorLabels: "person, vehicle, hardhat, safety-vest",
+    violationLabels: "restricted-area, no-hardhat, no-safety-vest",
+    confidenceThreshold: "0.20",
+    iouThreshold: "0.30",
+    frameStep: "5",
+    imageSize: "960",
+    restrictedZones: "Fuel Bay, Workshop, Conveyor Access",
+    requiredPpe: "helmet, safety vest, safety shoes",
+    maxPeopleInZone: "6",
+    alertCooldownSeconds: "120",
+    supervisorEscalationNote:
+      "Kirim alert ke supervisor area dan catat pelanggaran berulang sebagai incident review.",
+    incidentNarrativeTemplate:
+      "Pelanggaran aturan keselamatan terdeteksi pada area terbatas. Verifikasi visual operator diperlukan sebelum eskalasi.",
+  },
+};
 
 app.use("/analysis-output", express.static(analysisOutputRoot));
 
@@ -298,6 +377,22 @@ const appendAnalysisHistory = (entry) => {
   items.unshift(entry);
   writeAnalysisHistory(items);
   return entry;
+};
+
+const readModuleConfigs = () => {
+  if (!fileExists(moduleConfigsPath)) {
+    fs.writeFileSync(moduleConfigsPath, JSON.stringify({}, null, 2));
+    return {};
+  }
+
+  const raw = fs.readFileSync(moduleConfigsPath, "utf8");
+  const parsed = JSON.parse(raw);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+};
+
+const writeModuleConfigs = (items) => {
+  fs.writeFileSync(moduleConfigsPath, JSON.stringify(items, null, 2));
+  return items;
 };
 
 const ensureAnalysisDirectories = () => {
@@ -1234,6 +1329,56 @@ app.get("/analysis/no-helmet/jobs/:id", (req, res) => {
   }
 
   return res.json(sanitizeAnalysisJobForResponse(req, job));
+});
+
+app.get("/module-configs/:moduleKey", (req, res) => {
+  const schema = moduleConfigSchemas[req.params.moduleKey];
+  if (!schema) {
+    return res.status(404).json({ ok: false, message: "Module config not found." });
+  }
+
+  const items = readModuleConfigs();
+  const config = items[req.params.moduleKey] || defaultModuleConfigs[req.params.moduleKey];
+  const parsed = schema.safeParse(config);
+  if (!parsed.success) {
+    return res.status(500).json({
+      ok: false,
+      message: "Stored module config is invalid.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  return res.json({
+    ok: true,
+    moduleKey: req.params.moduleKey,
+    config: parsed.data,
+  });
+});
+
+app.put("/module-configs/:moduleKey", (req, res) => {
+  const schema = moduleConfigSchemas[req.params.moduleKey];
+  if (!schema) {
+    return res.status(404).json({ ok: false, message: "Module config not found." });
+  }
+
+  const parsed = schema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid module config payload",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const items = readModuleConfigs();
+  items[req.params.moduleKey] = parsed.data;
+  writeModuleConfigs(items);
+
+  return res.json({
+    ok: true,
+    moduleKey: req.params.moduleKey,
+    config: parsed.data,
+  });
 });
 
 app.post("/sync", async (req, res) => {

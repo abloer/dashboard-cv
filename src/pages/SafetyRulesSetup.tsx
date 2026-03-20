@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, RotateCcw, Save, ShieldCheck } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -16,6 +16,7 @@ import {
   resetSafetyRulesConfig,
   writeSafetyRulesConfig,
 } from "@/lib/safetyRulesConfig";
+import { getModuleConfig, updateModuleConfig } from "@/lib/moduleConfigs";
 
 export default function SafetyRulesSetup() {
   const navigate = useNavigate();
@@ -23,6 +24,7 @@ export default function SafetyRulesSetup() {
   const { toast } = useToast();
   const { data: mediaItems = [] } = useMediaRegistry();
   const [config, setConfig] = useState<SafetyRulesModuleConfig>(() => readSafetyRulesConfig());
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const selectedSourceId = searchParams.get("sourceId");
   const selectedSource = mediaItems.find((item) => item.id === selectedSourceId) || null;
@@ -56,25 +58,82 @@ export default function SafetyRulesSetup() {
   );
   const readyCount = readiness.filter((item) => item.ready).length;
 
+  useEffect(() => {
+    let ignore = false;
+    setIsSyncing(true);
+    getModuleConfig<SafetyRulesModuleConfig>("safety-rules")
+      .then((serverConfig) => {
+        if (ignore) return;
+        setConfig(serverConfig);
+        writeSafetyRulesConfig(serverConfig);
+      })
+      .catch(() => {
+        if (ignore) return;
+      })
+      .finally(() => {
+        if (!ignore) {
+          setIsSyncing(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
   const handleChange = (field: keyof SafetyRulesModuleConfig, value: string) => {
     setConfig((current) => ({ ...current, [field]: value }));
   };
 
-  const saveConfig = () => {
-    writeSafetyRulesConfig(config);
-    toast({
-      title: "Konfigurasi disimpan",
-      description: "Preset HSE • Safety Rules sudah aktif sebagai baseline operasional.",
-    });
+  const saveConfig = async () => {
+    setIsSyncing(true);
+    try {
+      const saved = await updateModuleConfig("safety-rules", config);
+      setConfig(saved);
+      writeSafetyRulesConfig(saved);
+      toast({
+        title: "Konfigurasi disimpan",
+        description: "Preset HSE • Safety Rules tersimpan di server dan aktif sebagai baseline operasional.",
+      });
+    } catch (error) {
+      writeSafetyRulesConfig(config);
+      toast({
+        title: "Server config belum tersinkron",
+        description:
+          error instanceof Error
+            ? `${error.message} Preset lokal tetap disimpan di browser ini.`
+            : "Preset lokal tetap disimpan di browser ini.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
-  const resetConfig = () => {
+  const resetConfig = async () => {
     const defaults = resetSafetyRulesConfig();
     setConfig(defaults);
-    toast({
-      title: "Konfigurasi direset",
-      description: "Preset safety rules dikembalikan ke nilai default.",
-    });
+    setIsSyncing(true);
+    try {
+      const saved = await updateModuleConfig("safety-rules", defaults);
+      setConfig(saved);
+      writeSafetyRulesConfig(saved);
+      toast({
+        title: "Konfigurasi direset",
+        description: "Preset safety rules dikembalikan ke nilai default server.",
+      });
+    } catch (error) {
+      toast({
+        title: "Reset lokal berhasil",
+        description:
+          error instanceof Error
+            ? `${error.message} Default lokal tetap diterapkan pada browser ini.`
+            : "Default lokal tetap diterapkan pada browser ini.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   return (
@@ -119,7 +178,7 @@ export default function SafetyRulesSetup() {
           <CardHeader>
             <CardTitle className="text-xl">Rule Profile</CardTitle>
             <CardDescription>
-              Simpan parameter dasar HSE agar source yang masuk kategori `HSE` punya baseline konfigurasi yang konsisten.
+              Simpan parameter dasar HSE ke server agar source yang masuk kategori `HSE` punya baseline konfigurasi yang konsisten lintas browser dan operator.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -186,11 +245,11 @@ export default function SafetyRulesSetup() {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Button type="button" onClick={saveConfig} className="gap-2">
+              <Button type="button" onClick={saveConfig} className="gap-2" disabled={isSyncing}>
                 <Save className="h-4 w-4" />
-                Simpan Konfigurasi
+                {isSyncing ? "Menyimpan..." : "Simpan Konfigurasi"}
               </Button>
-              <Button type="button" variant="outline" onClick={resetConfig} className="gap-2">
+              <Button type="button" variant="outline" onClick={resetConfig} className="gap-2" disabled={isSyncing}>
                 <RotateCcw className="h-4 w-4" />
                 Reset Default
               </Button>

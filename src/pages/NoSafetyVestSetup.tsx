@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { HardHat, RotateCcw, Save, ShieldAlert } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -16,35 +16,94 @@ import {
   resetNoSafetyVestConfig,
   writeNoSafetyVestConfig,
 } from "@/lib/noSafetyVestConfig";
+import { getModuleConfig, updateModuleConfig } from "@/lib/moduleConfigs";
 
 export default function NoSafetyVestSetup() {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const { data: mediaItems = [] } = useMediaRegistry();
   const [config, setConfig] = useState<NoSafetyVestModuleConfig>(() => readNoSafetyVestConfig());
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const selectedSourceId = searchParams.get("sourceId");
   const selectedSource = mediaItems.find((item) => item.id === selectedSourceId) || null;
+
+  useEffect(() => {
+    let ignore = false;
+    setIsSyncing(true);
+    getModuleConfig<NoSafetyVestModuleConfig>("no-safety-vest")
+      .then((serverConfig) => {
+        if (ignore) return;
+        setConfig(serverConfig);
+        writeNoSafetyVestConfig(serverConfig);
+      })
+      .catch(() => {
+        if (ignore) return;
+      })
+      .finally(() => {
+        if (!ignore) {
+          setIsSyncing(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   const handleChange = (field: keyof NoSafetyVestModuleConfig, value: string) => {
     setConfig((current) => ({ ...current, [field]: value }));
   };
 
-  const saveConfig = () => {
-    writeNoSafetyVestConfig(config);
-    toast({
-      title: "Konfigurasi disimpan",
-      description: "Preset default PPE • No Safety Vest siap dipakai untuk modul inspeksi rompi keselamatan.",
-    });
+  const saveConfig = async () => {
+    setIsSyncing(true);
+    try {
+      const saved = await updateModuleConfig("no-safety-vest", config);
+      setConfig(saved);
+      writeNoSafetyVestConfig(saved);
+      toast({
+        title: "Konfigurasi disimpan",
+        description: "Preset default PPE • No Safety Vest tersimpan di server dan siap dipakai lintas browser.",
+      });
+    } catch (error) {
+      writeNoSafetyVestConfig(config);
+      toast({
+        title: "Server config belum tersinkron",
+        description:
+          error instanceof Error
+            ? `${error.message} Preset lokal tetap disimpan di browser ini.`
+            : "Preset lokal tetap disimpan di browser ini.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
-  const resetConfig = () => {
+  const resetConfig = async () => {
     const defaults = resetNoSafetyVestConfig();
     setConfig(defaults);
-    toast({
-      title: "Konfigurasi direset",
-      description: "Preset modul no safety vest dikembalikan ke nilai default.",
-    });
+    setIsSyncing(true);
+    try {
+      const saved = await updateModuleConfig("no-safety-vest", defaults);
+      setConfig(saved);
+      writeNoSafetyVestConfig(saved);
+      toast({
+        title: "Konfigurasi direset",
+        description: "Preset modul no safety vest dikembalikan ke nilai default server.",
+      });
+    } catch (error) {
+      toast({
+        title: "Reset lokal berhasil",
+        description:
+          error instanceof Error
+            ? `${error.message} Default lokal tetap diterapkan pada browser ini.`
+            : "Default lokal tetap diterapkan pada browser ini.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   return (
@@ -89,7 +148,7 @@ export default function NoSafetyVestSetup() {
           <CardHeader>
             <CardTitle className="text-xl">Konfigurasi Default Modul</CardTitle>
             <CardDescription>
-              Preset baseline untuk inspeksi `No Safety Vest` sebelum dihubungkan ke engine deteksi spesifik.
+              Preset baseline untuk inspeksi `No Safety Vest` yang disimpan terpusat di server sebelum dihubungkan ke engine deteksi spesifik.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -145,11 +204,11 @@ export default function NoSafetyVestSetup() {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Button type="button" onClick={saveConfig} className="gap-2">
+              <Button type="button" onClick={saveConfig} className="gap-2" disabled={isSyncing}>
                 <Save className="h-4 w-4" />
-                Simpan Konfigurasi
+                {isSyncing ? "Menyimpan..." : "Simpan Konfigurasi"}
               </Button>
-              <Button type="button" variant="outline" onClick={resetConfig} className="gap-2">
+              <Button type="button" variant="outline" onClick={resetConfig} className="gap-2" disabled={isSyncing}>
                 <RotateCcw className="h-4 w-4" />
                 Reset Default
               </Button>
