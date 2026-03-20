@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   AlertTriangle,
-  FileUp,
   FileVideo,
   FolderSearch,
   HardHat,
@@ -39,7 +38,6 @@ import {
   getVideoPreview,
   startNoHelmetAnalysis,
   type NoHelmetAnalysisJob,
-  uploadVideoFile,
   type NoHelmetAnalysisEvent,
   type NoHelmetGlobalSummary,
   type NoHelmetAnalysisSummary,
@@ -211,15 +209,12 @@ export default function NoHelmetAnalysis() {
     defaultModelPath: string;
     defaultRoiConfigPath: string;
     analysisOutputRoot: string;
-    uploadRoot: string;
   } | null>(null);
   const [preview, setPreview] = useState<VideoPreviewResponse | null>(null);
-  const [selectedVideoFile, setSelectedVideoFile] = useState<File | null>(null);
   const [selectedSnapshotIndex, setSelectedSnapshotIndex] = useState<number | null>(null);
   const [dragPointIndex, setDragPointIndex] = useState<number | null>(null);
   const [stderr, setStderr] = useState("");
   const [stdout, setStdout] = useState("");
-  const [isUploading, setIsUploading] = useState(false);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [roiPoints, setRoiPoints] = useState<RoiPoint[]>(DEFAULT_ROI_POINTS);
@@ -258,7 +253,6 @@ export default function NoHelmetAnalysis() {
             defaultModelPath: defaults.defaultModelPath,
             defaultRoiConfigPath: defaults.defaultRoiConfigPath,
             analysisOutputRoot: defaults.analysisOutputRoot,
-            uploadRoot: defaults.uploadRoot,
           });
           setFormState((current) => {
             const legacyLocalPath =
@@ -298,6 +292,12 @@ export default function NoHelmetAnalysis() {
   useEffect(() => {
     if (!selectedSourceId) {
       lastAppliedSourceIdRef.current = null;
+      setPreview(null);
+      setFormState((current) => ({
+        ...current,
+        videoPath: "",
+        roiConfigPath: "",
+      }));
       return;
     }
 
@@ -327,12 +327,11 @@ export default function NoHelmetAnalysis() {
       roiId: nextRoiId,
       roiConfigPath: "",
     }));
-    setSelectedVideoFile(null);
-      setPreview(null);
-      setAnalysisJob(null);
-      setSummary(null);
-      setOutputDir("");
-      setStdout("");
+    setPreview(null);
+    setAnalysisJob(null);
+    setSummary(null);
+    setOutputDir("");
+    setStdout("");
     setStderr("");
     lastAppliedSourceIdRef.current = selectedSource.id;
 
@@ -367,6 +366,7 @@ export default function NoHelmetAnalysis() {
     return (Math.max(1, frameStep) * Math.max(1, onFrames)) / previewFps;
   }, [formState.frameStep, formState.violationOnFrames, previewFps]);
   const canRunAnalysis =
+    Boolean(selectedSource) &&
     formState.videoPath.trim().length > 0 &&
     formState.modelPath.trim().length > 0 &&
     (hasValidRoi || hasCustomRoiPath);
@@ -458,10 +458,6 @@ export default function NoHelmetAnalysis() {
     setRoiPoints((current) => current.filter((_, pointIndex) => pointIndex !== index));
   };
 
-  const handleVideoFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setSelectedVideoFile(event.target.files?.[0] || null);
-  };
-
   const loadPreview = async (videoPath: string) => {
     setIsPreviewLoading(true);
     try {
@@ -488,42 +484,6 @@ export default function NoHelmetAnalysis() {
       });
     } finally {
       setIsPreviewLoading(false);
-    }
-  };
-
-  const handleUploadVideo = async () => {
-    if (!selectedVideoFile) {
-      toast({
-        title: "Pilih file video dulu",
-        description: "Gunakan input upload untuk memilih video yang akan dikirim ke server lokal.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsUploading(true);
-    try {
-      const response = await uploadVideoFile(selectedVideoFile);
-      handleChange("videoPath", response.videoPath);
-      setAnalysisJob(null);
-      setSummary(null);
-      setOutputDir("");
-      setStdout("");
-      setStderr("");
-      await loadPreview(response.videoPath);
-      toast({
-        title: response.warning ? "Upload berhasil, metadata dibatasi" : "Upload berhasil",
-        description: response.warning || `${response.fileName} tersimpan di server lokal.`,
-      });
-    } catch (error) {
-      const message = humanizeRequestError(error);
-      toast({
-        title: "Upload gagal",
-        description: message,
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploading(false);
     }
   };
 
@@ -608,6 +568,15 @@ export default function NoHelmetAnalysis() {
   }, [analysisJob?.id, toast]);
 
   const handleRunAnalysis = async () => {
+    if (!selectedSource) {
+      toast({
+        title: "Pilih source dari Media Sources",
+        description: "Halaman ini hanya menjalankan analisis untuk source yang sudah terdaftar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsAnalyzing(true);
     try {
       setAnalysisJob(null);
@@ -747,6 +716,21 @@ export default function NoHelmetAnalysis() {
         </Card>
       ) : null}
 
+      {!selectedSource ? (
+        <Card className="mb-6 border-amber-500/30 bg-amber-500/10">
+          <CardContent className="flex items-start gap-3 p-5 text-sm text-amber-100">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="space-y-2">
+              <p className="font-medium text-foreground">Belum ada source yang dipilih</p>
+              <p>
+                Upload video dan pendaftaran camera stream dilakukan dari `Media Sources`. Buka source yang ingin dianalisis
+                dari sana, lalu masuk lagi ke halaman ini melalui action `Run Analysis`.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <MetricCard
           title="Event Terdeteksi"
@@ -781,36 +765,23 @@ export default function NoHelmetAnalysis() {
       <div className="grid grid-cols-1 xl:grid-cols-[1.05fr,0.95fr] gap-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Upload & Preview</CardTitle>
+            <CardTitle className="text-xl">Source & Preview</CardTitle>
             <CardDescription>
-              Upload video ke server lokal atau gunakan path yang sudah ada, lalu buat ROI dengan klik langsung di atas preview.
+              Gunakan source yang sudah dipilih dari `Media Sources`, lalu buat ROI dengan klik langsung di atas preview.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="grid gap-4 md:grid-cols-[1fr,auto]">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Upload Video File</label>
-                <Input type="file" accept="video/*" onChange={handleVideoFileChange} />
-                <p className="text-xs text-muted-foreground">
-                  File akan disimpan sementara di server lokal: {serverDefaults?.uploadRoot || "memuat..."}
-                </p>
-              </div>
-              <div className="flex items-end">
-                <Button onClick={handleUploadVideo} disabled={isUploading || !selectedVideoFile} className="gap-2 w-full md:w-auto">
-                  {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
-                  {isUploading ? "Mengunggah..." : "Upload Video"}
-                </Button>
-              </div>
-            </div>
-
             <div className="grid gap-4 md:grid-cols-[1fr,160px,auto]">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Video Path</label>
+                <label className="text-sm font-medium text-foreground">Source Path</label>
                 <Input
                   value={formState.videoPath}
-                  onChange={(event) => handleChange("videoPath", event.target.value)}
-                  placeholder="/Users/abloer/Downloads/Area_Produksi.mp4"
+                  readOnly
+                  placeholder="Pilih source dari Media Sources"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Upload video baru dan perubahan source dilakukan dari halaman `Media Sources`, bukan dari halaman run.
+                </p>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Preview Time (s)</label>
@@ -820,7 +791,12 @@ export default function NoHelmetAnalysis() {
                 />
               </div>
               <div className="flex items-end">
-                <Button onClick={() => loadPreview(formState.videoPath)} disabled={isPreviewLoading || !formState.videoPath.trim()} variant="outline" className="gap-2 w-full md:w-auto">
+                <Button
+                  onClick={() => loadPreview(formState.videoPath)}
+                  disabled={isPreviewLoading || !selectedSource || !formState.videoPath.trim()}
+                  variant="outline"
+                  className="gap-2 w-full md:w-auto"
+                >
                   {isPreviewLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                   {isPreviewLoading ? "Memuat..." : "Load Preview"}
                 </Button>
@@ -919,7 +895,9 @@ export default function NoHelmetAnalysis() {
                   </div>
                 ) : (
                   <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-dashed border-border bg-background/40 px-6 text-center text-sm text-muted-foreground">
-                    Upload video atau load preview dari path yang valid untuk mulai menggambar ROI.
+                    {selectedSource
+                      ? "Load preview dari source aktif untuk mulai menggambar ROI."
+                      : "Pilih source dari Media Sources terlebih dulu untuk mulai membuat preview dan ROI."}
                   </div>
                 )}
               </div>
