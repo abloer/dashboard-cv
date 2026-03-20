@@ -228,7 +228,7 @@ export default function NoHelmetAnalysis() {
     modelPath: savedConfig.modelPath,
     roiConfigPath: savedConfig.roiConfigPath,
     roiId: savedConfig.roiId,
-    previewTimestampSeconds: "1",
+    previewTimestampSeconds: "",
     confidenceThreshold: savedConfig.confidenceThreshold,
     iouThreshold: savedConfig.iouThreshold,
     topRatio: savedConfig.topRatio,
@@ -465,10 +465,11 @@ export default function NoHelmetAnalysis() {
   const loadPreview = async (videoPath: string) => {
     setIsPreviewLoading(true);
     try {
-      const timestamp = Number(formState.previewTimestampSeconds);
+      const trimmedTimestamp = formState.previewTimestampSeconds.trim();
+      const timestamp = trimmedTimestamp.length > 0 ? Number(trimmedTimestamp) : undefined;
       const response = await getVideoPreview(
         videoPath.trim(),
-        Number.isFinite(timestamp) ? timestamp : undefined
+        typeof timestamp === "number" && Number.isFinite(timestamp) ? timestamp : undefined
       );
       setPreview(response);
       if (roiPoints.length === 0) {

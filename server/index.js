@@ -805,7 +805,7 @@ app.post("/analysis/video-preview", async (req, res) => {
       typeof timestampSeconds === "number"
         ? timestampSeconds
         : metadata.durationSeconds > 0
-          ? Math.min(1, metadata.durationSeconds / 2)
+          ? metadata.durationSeconds / 2
           : 0;
 
     await runCommand("ffmpeg", [
