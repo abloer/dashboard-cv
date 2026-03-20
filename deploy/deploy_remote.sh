@@ -80,9 +80,16 @@ migrate_persistent_dir() {
   local legacy_path="\$1"
   local persistent_path="\$2"
   mkdir -p "\${persistent_path}"
-  if [[ -d "\${legacy_path}" ]] && find "\${legacy_path}" -mindepth 1 -print -quit >/dev/null 2>&1; then
-    cp -a "\${legacy_path}/." "\${persistent_path}/"
+  if [[ ! -d "\${legacy_path}" ]]; then
+    return
   fi
+  if ! find "\${legacy_path}" -mindepth 1 -print -quit >/dev/null 2>&1; then
+    return
+  fi
+  if find "\${persistent_path}" -mindepth 1 -print -quit >/dev/null 2>&1; then
+    return
+  fi
+  cp -a "\${legacy_path}/." "\${persistent_path}/"
 }
 
 migrate_to_git_repo() {
