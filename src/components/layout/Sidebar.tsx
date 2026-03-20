@@ -1,9 +1,9 @@
 import { Link, useLocation } from "react-router-dom";
-import { 
-  Brain, 
+import {
+  Brain,
   Boxes,
-  FileText, 
-  Settings, 
+  FileText,
+  Settings,
   LayoutDashboard,
   Monitor,
   ChevronLeft,
@@ -11,7 +11,8 @@ import {
   ChevronDown,
   ClipboardList,
   ShieldAlert,
-  HardHat
+  HardHat,
+  ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
@@ -28,6 +29,8 @@ const topLevelNavigation = [
 
 const analyticsNavigation = [
   { name: "PPE • No Helmet Setup", href: "/no-helmet-setup", icon: HardHat },
+  { name: "PPE • No Safety Vest Setup", href: "/no-safety-vest-setup", icon: HardHat },
+  { name: "HSE • Safety Rules Setup", href: "/safety-rules-setup", icon: ShieldCheck },
 ];
 
 export function Sidebar() {
@@ -127,7 +130,7 @@ export function Sidebar() {
             <ShieldAlert className={cn("w-5 h-5 shrink-0", isAnalyticsActive ? "text-primary" : "text-sidebar-foreground")} />
             {!collapsed && (
               <>
-                <span className="text-sm font-medium whitespace-nowrap animate-fade-in">PPE Modules</span>
+                <span className="text-sm font-medium whitespace-nowrap animate-fade-in">Analysis Modules</span>
                 <ChevronDown
                   className={cn(
                     "ml-auto h-4 w-4 transition-transform duration-200",

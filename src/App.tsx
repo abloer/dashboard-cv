@@ -12,6 +12,8 @@ import OutputData from "./pages/OutputData";
 import NoHelmetAnalysis from "./pages/NoHelmetAnalysis";
 import AnalysisSetup from "./pages/AnalysisSetup";
 import NoHelmetSetup from "./pages/NoHelmetSetup";
+import NoSafetyVestSetup from "./pages/NoSafetyVestSetup";
+import SafetyRulesSetup from "./pages/SafetyRulesSetup";
 import Models from "./pages/Models";
 import LiveMonitoring from "./pages/LiveMonitoring";
 
@@ -29,6 +31,8 @@ const App = () => (
             <Route path="/output-data" element={<OutputData />} />
             <Route path="/analysis-setup" element={<AnalysisSetup />} />
             <Route path="/no-helmet-setup" element={<NoHelmetSetup />} />
+            <Route path="/no-safety-vest-setup" element={<NoSafetyVestSetup />} />
+            <Route path="/safety-rules-setup" element={<SafetyRulesSetup />} />
             <Route path="/no-helmet-analysis" element={<NoHelmetAnalysis />} />
             <Route path="/live-monitoring" element={<LiveMonitoring />} />
             <Route path="/models" element={<Models />} />

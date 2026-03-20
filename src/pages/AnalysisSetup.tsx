@@ -24,9 +24,9 @@ const CATEGORY_CARDS = [
       },
       {
         name: "No Safety Vest",
-        description: "Placeholder untuk modul rompi keselamatan.",
-        href: "",
-        status: "planned" as const,
+        description: "Konfigurasi awal untuk inspeksi pekerja tanpa rompi keselamatan.",
+        href: "/no-safety-vest-setup",
+        status: "active" as const,
       },
     ],
   },
@@ -38,9 +38,9 @@ const CATEGORY_CARDS = [
     modules: [
       {
         name: "Safety Rules",
-        description: "Placeholder untuk aturan keselamatan umum.",
-        href: "",
-        status: "planned" as const,
+        description: "Konfigurasi baseline untuk restricted zone dan aturan keselamatan umum.",
+        href: "/safety-rules-setup",
+        status: "active" as const,
       },
     ],
   },
