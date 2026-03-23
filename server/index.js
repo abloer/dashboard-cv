@@ -193,6 +193,10 @@ const defaultModuleConfigs = {
   },
 };
 
+const hseSafetyRulesPayloadSchema = z.object({
+  mediaSourceId: z.string().trim().min(1),
+});
+
 app.use("/analysis-output", express.static(analysisOutputRoot));
 
 const supabase =
@@ -379,6 +383,18 @@ const appendAnalysisHistory = (entry) => {
   return entry;
 };
 
+const getModuleConfig = (moduleKey) => {
+  const schema = moduleConfigSchemas[moduleKey];
+  const fallback = defaultModuleConfigs[moduleKey];
+  if (!schema || !fallback) {
+    return null;
+  }
+
+  const items = readModuleConfigs();
+  const parsed = schema.safeParse(items[moduleKey] || fallback);
+  return parsed.success ? parsed.data : fallback;
+};
+
 const readModuleConfigs = () => {
   if (!fileExists(moduleConfigsPath)) {
     fs.writeFileSync(moduleConfigsPath, JSON.stringify({}, null, 2));
@@ -539,6 +555,220 @@ const buildLatestAnalysisSummary = (req, run) => {
       ? latestRunSummary.events.slice(0, 6)
       : [],
   };
+};
+
+const splitCommaSeparated = (value) =>
+  String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const getLatestRunForSource = (analysisType, mediaSource) => {
+  const analysisHistory = readAnalysisHistory();
+  const typedHistory = analysisHistory.filter((item) => item.analysisType === analysisType);
+  return (
+    typedHistory.find((run) => run.mediaSourceId === mediaSource.id) ||
+    typedHistory.find((run) => run.videoPath === mediaSource.source) ||
+    null
+  );
+};
+
+const severityRank = {
+  low: 1,
+  medium: 2,
+  high: 3,
+};
+
+const buildHseSafetyRulesReport = (req, source, config) => {
+  const latestNoHelmetRun = getLatestRunForSource("no_helmet", source);
+  const latestNoHelmetSummary = latestNoHelmetRun
+    ? buildLatestAnalysisSummary(req, latestNoHelmetRun)
+    : null;
+  const requiredPpe = splitCommaSeparated(config.requiredPpe);
+  const restrictedZones = splitCommaSeparated(config.restrictedZones);
+  const findings = [];
+  const readiness = [];
+
+  const modelReady = fileExists(config.modelPath);
+  readiness.push({
+    id: "model",
+    label: "Model HSE",
+    status: modelReady ? "ready" : "missing",
+    detail: modelReady
+      ? `Model tersedia di ${config.modelPath}`
+      : `Model path ${config.modelPath} belum tersedia di server.`,
+  });
+
+  readiness.push({
+    id: "zones",
+    label: "Restricted Zones",
+    status: restrictedZones.length > 0 ? "ready" : "missing",
+    detail:
+      restrictedZones.length > 0
+        ? `${restrictedZones.length} zona tercatat untuk pengawasan.`
+        : "Belum ada restricted zone yang didefinisikan.",
+  });
+
+  readiness.push({
+    id: "required-ppe",
+    label: "Required PPE",
+    status: requiredPpe.length > 0 ? "ready" : "missing",
+    detail:
+      requiredPpe.length > 0
+        ? requiredPpe.join(", ")
+        : "Checklist PPE wajib belum ditentukan.",
+  });
+
+  readiness.push({
+    id: "source-context",
+    label: "Source Context",
+    status: source.status === "active" ? "ready" : "warning",
+    detail: `${source.name} • ${source.location} • ${source.type === "camera" ? "Camera" : "Upload"}`,
+  });
+
+  if (!source.analytics.includes("HSE")) {
+    findings.push({
+      id: "missing-hse-category",
+      title: "Source belum ditandai untuk kategori HSE",
+      severity: "medium",
+      status: "open",
+      detail:
+        "Source ini belum memasukkan kategori output HSE di Media Sources sehingga rule keselamatan umum berisiko tidak masuk workflow operator.",
+      recommendation: "Tambahkan kategori HSE pada source agar dashboard dan operator memakai workflow yang konsisten.",
+    });
+  }
+
+  if (!modelReady) {
+    findings.push({
+      id: "missing-model",
+      title: "Model HSE belum tersedia",
+      severity: "high",
+      status: "open",
+      detail: `Model path ${config.modelPath} tidak ditemukan di server.`,
+      recommendation: "Sinkronkan model HSE ke server atau gunakan model PPE/HSE yang valid sebelum assessment rutin dijalankan.",
+    });
+  }
+
+  if (source.type === "camera" && source.executionMode !== "manual" && source.monitoringStatus !== "running") {
+    findings.push({
+      id: "monitoring-inactive",
+      title: "Monitoring source camera belum aktif",
+      severity: "medium",
+      status: "open",
+      detail: `Source camera berada pada mode ${source.executionMode} tetapi status monitoring masih ${source.monitoringStatus}.`,
+      recommendation: "Aktifkan monitoring dari Live Monitoring agar rule HSE dievaluasi secara berkala.",
+    });
+  }
+
+  if (source.status !== "active") {
+    findings.push({
+      id: "source-status",
+      title: "Status source belum aktif",
+      severity: source.status === "maintenance" ? "medium" : "high",
+      status: "open",
+      detail: `Status source saat ini ${source.status}.`,
+      recommendation: "Kembalikan source ke status active sebelum dijadikan baseline HSE operasional.",
+    });
+  }
+
+  if (latestNoHelmetSummary) {
+    if (requiredPpe.some((item) => /helmet/i.test(item)) && latestNoHelmetSummary.violatorCount > 0) {
+      findings.push({
+        id: "helmet-violation",
+        title: "Pelanggaran helm terdeteksi pada baseline HSE",
+        severity: latestNoHelmetSummary.violatorCount >= 2 ? "high" : "medium",
+        status: "open",
+        detail: `Run terakhir menemukan ${latestNoHelmetSummary.eventCount} event dan ${latestNoHelmetSummary.violatorCount} track pelanggar untuk aturan helm.`,
+        recommendation: "Lakukan inspeksi lapangan, pastikan area wajib helm dipatuhi, dan tindak lanjuti pelanggaran berulang.",
+        metric: `${latestNoHelmetSummary.eventCount} event / ${latestNoHelmetSummary.violatorCount} violator`,
+      });
+    }
+  } else {
+    findings.push({
+      id: "missing-evidence",
+      title: "Belum ada evidence analitik untuk source ini",
+      severity: "medium",
+      status: "open",
+      detail: "Belum ada run PPE • No Helmet yang bisa dipakai sebagai baseline evidence HSE untuk source ini.",
+      recommendation: "Jalankan analisis PPE terlebih dulu atau aktifkan monitoring camera agar baseline HSE punya evidence visual.",
+    });
+  }
+
+  const highestSeverity = findings.reduce((current, item) => {
+    return severityRank[item.severity] > severityRank[current] ? item.severity : current;
+  }, "low");
+
+  const outputRiskLevel =
+    findings.length === 0 ? "low" : highestSeverity === "high" ? "high" : highestSeverity === "medium" ? "medium" : "low";
+
+  const readyCount = readiness.filter((item) => item.status === "ready").length;
+
+  return {
+    source: {
+      id: source.id,
+      name: source.name,
+      location: source.location,
+      type: source.type,
+      status: source.status,
+      analytics: source.analytics,
+      executionMode: source.executionMode,
+      monitoringStatus: source.monitoringStatus,
+      monitoringIntervalSeconds: source.monitoringIntervalSeconds,
+    },
+    configSnapshot: config,
+    readiness: {
+      readyCount,
+      totalCount: readiness.length,
+      items: readiness,
+    },
+    latestEvidence: latestNoHelmetSummary
+      ? {
+          analysisType: latestNoHelmetSummary.analysisType,
+          createdAt: latestNoHelmetSummary.createdAt,
+          eventCount: latestNoHelmetSummary.eventCount,
+          violatorCount: latestNoHelmetSummary.violatorCount,
+          snapshotCount: latestNoHelmetSummary.snapshotCount,
+          narrative: latestNoHelmetSummary.narrative,
+          outputDir: latestNoHelmetSummary.outputDir,
+          latestSnapshotUrl:
+            latestNoHelmetSummary.events.find((event) => event.snapshotUrl)?.snapshotUrl || null,
+        }
+      : null,
+    findings,
+    summary: {
+      riskLevel: outputRiskLevel,
+      openFindingCount: findings.length,
+      highSeverityCount: findings.filter((item) => item.severity === "high").length,
+      mediumSeverityCount: findings.filter((item) => item.severity === "medium").length,
+      lowSeverityCount: findings.filter((item) => item.severity === "low").length,
+      latestNoHelmetEventCount: latestNoHelmetSummary?.eventCount || 0,
+      latestNoHelmetViolatorCount: latestNoHelmetSummary?.violatorCount || 0,
+      requiredPpe,
+      restrictedZones,
+      generatedAt: new Date().toISOString(),
+      narrative:
+        findings.length === 0
+          ? `Baseline HSE untuk ${source.name} terlihat sehat. Semua komponen inti tersedia dan belum ada temuan kritis dari evidence terbaru.`
+          : `Assessment HSE untuk ${source.name} menghasilkan ${findings.length} temuan aktif dengan level risiko ${outputRiskLevel}. Fokus utama ada pada kesiapan monitoring, baseline PPE, dan restricted zone.`,
+    },
+  };
+};
+
+const readHseSafetyRulesReport = (outputDir) => {
+  if (!outputDir || !fileExists(outputDir)) {
+    return null;
+  }
+
+  const reportPath = path.join(outputDir, "report.json");
+  if (!fileExists(reportPath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(reportPath, "utf8"));
+  } catch (_error) {
+    return null;
+  }
 };
 
 const sanitizeAnalysisJobForResponse = (req, job) => {
@@ -1288,6 +1518,100 @@ app.get("/analysis/no-helmet/defaults", (_req, res) => {
     analysisOutputRoot,
     serverPort: Number(PORT),
     uploadRoot,
+  });
+});
+
+app.get("/analysis/hse-safety-rules/defaults", (_req, res) => {
+  const config = getModuleConfig("safety-rules");
+  return res.json({
+    ok: true,
+    moduleKey: "safety-rules",
+    analysisOutputRoot,
+    config,
+  });
+});
+
+app.get("/analysis/hse-safety-rules/source/:id/latest", (req, res) => {
+  const mediaSources = readMediaRegistry();
+  const source = mediaSources.find((item) => item.id === req.params.id);
+  if (!source) {
+    return res.status(404).json({ ok: false, message: "Media source not found." });
+  }
+
+  const latestRun = getLatestRunForSource("hse_safety_rules", source);
+  const report = latestRun ? readHseSafetyRulesReport(latestRun.outputDir) : null;
+
+  return res.json({
+    ok: true,
+    source: {
+      id: source.id,
+      name: source.name,
+      location: source.location,
+      type: source.type,
+      status: source.status,
+      analytics: source.analytics,
+      executionMode: source.executionMode,
+      monitoringStatus: source.monitoringStatus,
+      monitoringIntervalSeconds: source.monitoringIntervalSeconds,
+    },
+    latestReport: report,
+  });
+});
+
+app.post("/analysis/hse-safety-rules", (req, res) => {
+  const parsed = hseSafetyRulesPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid HSE Safety Rules payload",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const mediaSources = readMediaRegistry();
+  const source = mediaSources.find((item) => item.id === parsed.data.mediaSourceId);
+  if (!source) {
+    return res.status(404).json({ ok: false, message: "Media source not found." });
+  }
+
+  const config = getModuleConfig("safety-rules");
+  if (!config) {
+    return res.status(500).json({ ok: false, message: "HSE Safety Rules config is unavailable." });
+  }
+
+  const runId = `hse-run-${Date.now()}`;
+  const outputDir = path.join(analysisOutputRoot, runId);
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const report = buildHseSafetyRulesReport(req, source, config);
+  const reportPayload = {
+    id: runId,
+    analysisType: "hse_safety_rules",
+    outputDir,
+    createdAt: new Date().toISOString(),
+    ...report,
+  };
+
+  fs.writeFileSync(path.join(outputDir, "report.json"), JSON.stringify(reportPayload, null, 2));
+
+  appendAnalysisHistory({
+    id: runId,
+    analysisType: "hse_safety_rules",
+    mediaSourceId: source.id,
+    sourceName: source.name,
+    location: source.location || null,
+    videoPath: source.source,
+    outputDir,
+    eventCount: reportPayload.summary.openFindingCount,
+    violatorCount: reportPayload.summary.highSeverityCount,
+    stableDetectedTrackCount: reportPayload.readiness.readyCount,
+    rawDetectedTrackCount: reportPayload.readiness.totalCount,
+    createdAt: reportPayload.createdAt,
+  });
+
+  return res.json({
+    ok: true,
+    report: reportPayload,
   });
 });
 

@@ -320,6 +320,16 @@ export default function SafetyRulesSetup() {
                     {isCameraSource ? "Buka Live Monitoring" : "Kembali ke Analysis Setup"}
                   </Button>
                 ) : null}
+                {selectedSource ? (
+                  <Button
+                    type="button"
+                    onClick={() =>
+                      navigate(`/hse-safety-rules-run?sourceId=${encodeURIComponent(selectedSource.id)}`)
+                    }
+                  >
+                    Jalankan HSE Assessment
+                  </Button>
+                ) : null}
               </div>
             </CardContent>
           </Card>
