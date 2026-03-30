@@ -96,6 +96,41 @@ const modelVersionStatusLabelMap = {
   rejected: "Rejected",
 } as const;
 
+const datasetTemplateByModule: Record<
+  ModelTargetModule,
+  {
+    labels: string[];
+    description: string;
+    notes: string;
+    imageSize: number;
+  }
+> = {
+  "ppe.no-helmet": {
+    labels: ["person", "hardhat"],
+    description:
+      "Fokus pada person + hardhat dengan contoh pekerja dekat, jauh, occluded, dan variasi lighting. Label negatif no-hardhat tetap opsional.",
+    notes:
+      "Fine-tune baseline helmet untuk scene proyek dengan pekerja jauh, alat berat, dan false positive background.",
+    imageSize: 1280,
+  },
+  "ppe.no-safety-vest": {
+    labels: ["person", "safety-vest"],
+    description:
+      "Disarankan mulai dari model positive vest: person + safety-vest. Gunakan contoh pekerja tanpa rompi sebagai hard case evaluasi, bukan keharusan label negatif di tahap awal.",
+    notes:
+      "Fine-tune model vest khusus dengan fokus pada positive safety-vest, worker kecil/jauh, occlusion, dan variasi warna background proyek.",
+    imageSize: 1280,
+  },
+  "hse.safety-rules": {
+    labels: ["person", "vehicle", "hardhat", "safety-vest"],
+    description:
+      "Dataset HSE dipakai untuk baseline detector policy lintas restricted zone, PPE evidence, dan aktivitas operasional umum.",
+    notes:
+      "Siapkan baseline detector HSE untuk person, vehicle, hardhat, dan safety-vest sebagai input rule engine.",
+    imageSize: 1280,
+  },
+};
+
 const domainBadgeClassMap: Record<ModelDatasetDomain, string> = {
   PPE: "bg-primary/10 text-primary border-primary/30",
   HSE: "bg-accent/10 text-accent border-accent/30",
@@ -321,12 +356,15 @@ export default function Models() {
       const preferredActiveModel = overview.activeModelsByModule.find(
         (item) => item.moduleKey === nextTargetModule
       );
+      const moduleTemplate = datasetTemplateByModule[nextTargetModule];
 
       return {
         ...current,
         datasetId: nextDatasetId,
         targetModule: nextTargetModule,
         baseModelPath: current.baseModelPath || preferredActiveModel?.modelPath || defaultBaseModelPath(nextTargetModule, overview),
+        imageSize: current.imageSize || moduleTemplate.imageSize,
+        notes: current.notes || moduleTemplate.notes,
       };
     });
   }, [overview, readyDatasets]);
@@ -400,12 +438,15 @@ export default function Models() {
     const preferredActiveModel = overview.activeModelsByModule.find(
       (item) => item.moduleKey === nextTargetModule
     );
+    const moduleTemplate = datasetTemplateByModule[nextTargetModule];
 
     setTrainingJobDraft((current) => ({
       ...current,
       datasetId,
       targetModule: nextTargetModule,
       baseModelPath: preferredActiveModel?.modelPath || defaultBaseModelPath(nextTargetModule, overview),
+      imageSize: moduleTemplate.imageSize,
+      notes: current.notes || moduleTemplate.notes,
     }));
   };
 
@@ -413,11 +454,28 @@ export default function Models() {
     const preferredActiveModel = overview.activeModelsByModule.find(
       (item) => item.moduleKey === targetModule
     );
+    const moduleTemplate = datasetTemplateByModule[targetModule];
     setTrainingJobDraft((current) => ({
       ...current,
       targetModule,
       baseModelPath: preferredActiveModel?.modelPath || current.baseModelPath || defaultBaseModelPath(targetModule, overview),
+      imageSize: moduleTemplate.imageSize,
+      notes: current.notes || moduleTemplate.notes,
     }));
+  };
+
+  const applyDatasetTemplate = (targetModule: ModelTargetModule) => {
+    const template = datasetTemplateByModule[targetModule];
+    setDatasetDraft((current) => ({
+      ...current,
+      domain: targetModule === "hse.safety-rules" ? "HSE" : "PPE",
+      labels: template.labels,
+      description: current.description || template.description,
+    }));
+    toast({
+      title: "Template dataset diterapkan",
+      description: `Draft dataset sekarang mengikuti rekomendasi awal untuk ${moduleLabelMap[targetModule]}.`,
+    });
   };
 
   const handleCreateDataset = async () => {
@@ -860,6 +918,23 @@ export default function Models() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-lg border border-border/70 bg-secondary/10 p-4 space-y-3">
+              <p className="text-sm font-medium text-foreground">Template Dataset Cepat</p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => applyDatasetTemplate("ppe.no-helmet")}>
+                  PPE • No Helmet
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => applyDatasetTemplate("ppe.no-safety-vest")}>
+                  PPE • No Safety Vest
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => applyDatasetTemplate("hse.safety-rules")}>
+                  HSE • Safety Rules
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Untuk vest, arah yang disarankan adalah dataset <code>person, safety-vest</code> agar model fokus pada positive vest lebih dulu sebelum rule engine menghitung missing vest.
+              </p>
+            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Nama Dataset</label>
               <Input
@@ -909,7 +984,7 @@ export default function Models() {
                 placeholder="person, hardhat"
               />
               <p className="text-xs text-muted-foreground">
-                Pisahkan label dengan koma. Untuk tahap awal PPE, cukup `person, hardhat`.
+                Pisahkan label dengan koma. Untuk vest, mulailah dari <code>person, safety-vest</code> agar model tidak terlalu bergantung pada label negatif langsung.
               </p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
@@ -1085,6 +1160,12 @@ export default function Models() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-4 space-y-2">
+              <p className="text-sm font-medium text-foreground">Playbook per Modul</p>
+              <p className="text-xs text-muted-foreground">
+                {datasetTemplateByModule[trainingJobDraft.targetModule].description}
+              </p>
+            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Dataset Ready</label>
               <Select

@@ -88,6 +88,47 @@ export default function NoSafetyVestSetup() {
     setConfig((current) => ({ ...current, [field]: value }));
   };
 
+  const useDeploymentGateModel = () => {
+    if (!activeModel?.modelPath) {
+      toast({
+        title: "Belum ada model aktif",
+        description: "Deployment Gate belum punya model aktif untuk modul PPE • No Safety Vest.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setConfig((current) => ({
+      ...current,
+      modelSource: "deployment-gate",
+      modelPath: activeModel.modelPath,
+    }));
+    toast({
+      title: "Model aktif dipakai",
+      description: `Konfigurasi sekarang mengikuti model aktif ${activeModel.name} dari Deployment Gate.`,
+    });
+  };
+
+  const applyPositiveVestBaseline = () => {
+    setConfig((current) => ({
+      ...current,
+      confidenceThreshold: "0.28",
+      iouThreshold: "0.30",
+      vestLabels: "safety-vest, vest",
+      violationLabels: "",
+      violationOnFrames: "3",
+      cleanOffFrames: "3",
+      frameStep: "2",
+      imageSize: "1280",
+      operationalNotes:
+        "Baseline default disarankan memakai model positive vest yang stabil. Label negatif langsung dibuat opsional agar violation final lebih mengandalkan bukti vest positif yang hilang secara konsisten.",
+    }));
+    toast({
+      title: "Baseline positive vest diterapkan",
+      description: "Preset ini menyiapkan modul vest untuk model khusus rompi keselamatan dan mengurangi ketergantungan pada label negatif langsung.",
+    });
+  };
+
   const saveConfig = async () => {
     setIsSyncing(true);
     try {
@@ -176,6 +217,9 @@ export default function NoSafetyVestSetup() {
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" variant="outline" onClick={useDeploymentGateModel} disabled={isSyncing || !activeModel}>
                     Gunakan Model Aktif
+                  </Button>
+                  <Button type="button" variant="outline" onClick={applyPositiveVestBaseline} disabled={isSyncing}>
+                    Gunakan Baseline Positive Vest
                   </Button>
                 </div>
               </div>
@@ -310,6 +354,14 @@ export default function NoSafetyVestSetup() {
                   Selain detector setup, modul ini sekarang menyimpan policy baseline seperti PPE wajib, cooldown alert, dan catatan operasional agar run per-source langsung konsisten.
                 </p>
               </div>
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4">
+                <p className="text-sm font-medium text-foreground">Strategi Improvement Model Vest</p>
+                <p className="mt-2 text-xs leading-6 text-muted-foreground">
+                  Untuk modul vest, strategi yang lebih stabil adalah melatih model positif <span className="text-foreground">person + safety-vest</span>, lalu gunakan fallback logic untuk
+                  mengidentifikasi pekerja yang tidak punya bukti vest secara konsisten. Label negatif langsung seperti <code>no-safety-vest</code> tetap opsional dan tidak perlu dipaksa menjadi
+                  sinyal utama pada semua kamera.
+                </p>
+              </div>
             </CardContent>
           </Card>
 
@@ -353,23 +405,3 @@ export default function NoSafetyVestSetup() {
     </DashboardLayout>
   );
 }
-  const useDeploymentGateModel = () => {
-    if (!activeModel?.modelPath) {
-      toast({
-        title: "Belum ada model aktif",
-        description: "Deployment Gate belum punya model aktif untuk modul PPE • No Safety Vest.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setConfig((current) => ({
-      ...current,
-      modelSource: "deployment-gate",
-      modelPath: activeModel.modelPath,
-    }));
-    toast({
-      title: "Model aktif dipakai",
-      description: `Konfigurasi sekarang mengikuti model aktif ${activeModel.name} dari Deployment Gate.`,
-    });
-  };

@@ -23,18 +23,18 @@ export const DEFAULT_NO_SAFETY_VEST_CONFIG: NoSafetyVestModuleConfig = {
   modelPath: "/app/models/detect-construction-safety-best.pt",
   roiId: "area-produksi-vest",
   roiConfigPath: "",
-  confidenceThreshold: "0.20",
+  confidenceThreshold: "0.28",
   iouThreshold: "0.30",
   vestLabels: "safety-vest, vest",
-  violationLabels: "no-safety-vest, no-vest",
-  violationOnFrames: "2",
-  cleanOffFrames: "2",
-  frameStep: "5",
-  imageSize: "960",
+  violationLabels: "",
+  violationOnFrames: "3",
+  cleanOffFrames: "3",
+  frameStep: "2",
+  imageSize: "1280",
   requiredPpe: "safety vest, helmet, safety shoes",
   alertCooldownSeconds: "90",
   operationalNotes:
-    "Gunakan modul ini untuk inspeksi rompi keselamatan pada area produksi, loading point, dan jalur pejalan kaki.",
+    "Gunakan modul ini untuk inspeksi rompi keselamatan pada area produksi, loading point, dan jalur pejalan kaki. Baseline default disarankan memakai model positive vest yang stabil, lalu fallback logic menangani missing vest.",
 };
 
 export function readNoSafetyVestConfig(): NoSafetyVestModuleConfig {

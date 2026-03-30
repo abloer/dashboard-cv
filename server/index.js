@@ -84,21 +84,7 @@ if (!fs.existsSync(modelVersionsPath)) {
   fs.writeFileSync(
     modelVersionsPath,
     JSON.stringify(
-      [
-        {
-          id: "model-version-ppe-no-helmet-default",
-          name: "Construction Safety Baseline",
-          moduleKey: "ppe.no-helmet",
-          domain: "PPE",
-          labels: ["person", "hardhat", "no-hardhat"],
-          modelPath: defaultModelPath,
-          sourceJobId: null,
-          evaluationSummary: "Baseline model komunitas yang saat ini dipakai untuk inference PPE.",
-          status: "active",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-      ],
+      [],
       null,
       2
     )
@@ -281,18 +267,18 @@ const defaultModuleConfigs = {
     modelPath: defaultModelPath,
     roiId: "area-produksi-vest",
     roiConfigPath: "",
-    confidenceThreshold: "0.20",
+    confidenceThreshold: "0.28",
     iouThreshold: "0.30",
     vestLabels: "safety-vest, vest",
-    violationLabels: "no-safety-vest, no-vest",
-    violationOnFrames: "2",
-    cleanOffFrames: "2",
-    frameStep: "5",
-    imageSize: "960",
+    violationLabels: "",
+    violationOnFrames: "3",
+    cleanOffFrames: "3",
+    frameStep: "2",
+    imageSize: "1280",
     requiredPpe: "safety vest, helmet, safety shoes",
     alertCooldownSeconds: "90",
     operationalNotes:
-      "Gunakan modul ini untuk inspeksi rompi keselamatan pada area produksi, loading point, dan jalur pejalan kaki.",
+      "Gunakan modul ini untuk inspeksi rompi keselamatan pada area produksi, loading point, dan jalur pejalan kaki. Baseline default disarankan memakai model positive vest yang stabil, lalu fallback logic menangani missing vest.",
   },
   "safety-rules": {
     modelSource: "deployment-gate",
@@ -677,6 +663,45 @@ const modelTargetModuleByConfigKey = {
   "safety-rules": "hse.safety-rules",
 };
 
+const DEFAULT_MODEL_VERSION_SEEDS = [
+  {
+    id: "model-version-ppe-no-helmet-default",
+    name: "Construction Safety Baseline",
+    moduleKey: "ppe.no-helmet",
+    domain: "PPE",
+    labels: ["person", "hardhat", "no-hardhat"],
+    modelPath: defaultModelPath,
+    sourceJobId: null,
+    evaluationSummary:
+      "Baseline model komunitas yang saat ini dipakai untuk inference PPE helmet pada area konstruksi.",
+    status: "active",
+  },
+  {
+    id: "model-version-ppe-no-safety-vest-default",
+    name: "Safety Vest Baseline",
+    moduleKey: "ppe.no-safety-vest",
+    domain: "PPE",
+    labels: ["person", "safety-vest"],
+    modelPath: defaultModelPath,
+    sourceJobId: null,
+    evaluationSummary:
+      "Baseline awal untuk modul rompi keselamatan. Disarankan diganti dengan model vest khusus melalui Training Jobs dan Deployment Gate.",
+    status: "active",
+  },
+  {
+    id: "model-version-hse-safety-rules-default",
+    name: "Safety Rules Baseline",
+    moduleKey: "hse.safety-rules",
+    domain: "HSE",
+    labels: ["person", "vehicle", "hardhat", "safety-vest"],
+    modelPath: defaultModelPath,
+    sourceJobId: null,
+    evaluationSummary:
+      "Baseline policy HSE yang memakai evidence PPE/HSE default sebelum kandidat model khusus diaktifkan.",
+    status: "active",
+  },
+];
+
 const getActiveModelVersion = (moduleKey) => {
   if (!moduleKey) {
     return null;
@@ -804,6 +829,32 @@ const writeModelTrainingJobs = (items) => {
   return items;
 };
 
+const ensureDefaultModelVersions = (items) => {
+  const nextItems = Array.isArray(items) ? [...items] : [];
+  let didChange = false;
+
+  for (const seed of DEFAULT_MODEL_VERSION_SEEDS) {
+    const existing = nextItems.find((item) => item.moduleKey === seed.moduleKey && item.status === "active");
+    if (existing) {
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    nextItems.unshift({
+      ...seed,
+      createdAt: now,
+      updatedAt: now,
+    });
+    didChange = true;
+  }
+
+  if (didChange) {
+    fs.writeFileSync(modelVersionsPath, JSON.stringify(nextItems, null, 2));
+  }
+
+  return nextItems;
+};
+
 const readModelVersions = () => {
   if (!fileExists(modelVersionsPath)) {
     fs.writeFileSync(modelVersionsPath, JSON.stringify([], null, 2));
@@ -812,12 +863,13 @@ const readModelVersions = () => {
 
   const raw = fs.readFileSync(modelVersionsPath, "utf8");
   const parsed = JSON.parse(raw);
-  return Array.isArray(parsed)
+  const validItems = Array.isArray(parsed)
     ? parsed
         .map((item) => modelVersionSchema.safeParse(item))
         .filter((result) => result.success)
         .map((result) => result.data)
     : [];
+  return ensureDefaultModelVersions(validItems);
 };
 
 const writeModelVersions = (items) => {
