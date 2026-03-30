@@ -3,7 +3,6 @@ const { randomUUID } = require("crypto");
 const dotenv = require("dotenv");
 const express = require("express");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const { execFile, execFileSync } = require("child_process");
 const { createClient } = require("@supabase/supabase-js");
@@ -35,12 +34,16 @@ const defaultModelPath = path.resolve(
   process.env.ANALYSIS_DEFAULT_MODEL_PATH || path.join(repoRoot, "models/detect-construction-safety-best.pt")
 );
 const configuredAnalysisOutputRoot = path.resolve(
-  ANALYSIS_OUTPUT_ROOT || path.join(os.tmpdir(), "dashboard-cv-ut-analysis-runs")
+  ANALYSIS_OUTPUT_ROOT || path.join(repoRoot, "runtime-analysis")
 );
 const analysisVenvPythonPath = path.resolve(repoRoot, ".venv-analysis/bin/python");
 const mediaRegistryPath = path.resolve(repoRoot, "server/data/media-sources.json");
 const analysisHistoryPath = path.resolve(repoRoot, "server/data/analysis-history.json");
 const moduleConfigsPath = path.resolve(repoRoot, "server/data/module-configs.json");
+const modelDatasetsPath = path.resolve(repoRoot, "server/data/model-datasets.json");
+const modelTrainingJobsPath = path.resolve(repoRoot, "server/data/model-training-jobs.json");
+const modelVersionsPath = path.resolve(repoRoot, "server/data/model-versions.json");
+const modelEvaluationsPath = path.resolve(repoRoot, "server/data/model-evaluations.json");
 fs.mkdirSync(configuredAnalysisOutputRoot, { recursive: true });
 const analysisOutputRoot = fs.realpathSync.native(configuredAnalysisOutputRoot);
 const uploadRoot = path.join(analysisOutputRoot, "uploads");
@@ -48,6 +51,10 @@ const previewRoot = path.join(analysisOutputRoot, "previews");
 fs.mkdirSync(path.dirname(mediaRegistryPath), { recursive: true });
 fs.mkdirSync(path.dirname(analysisHistoryPath), { recursive: true });
 fs.mkdirSync(path.dirname(moduleConfigsPath), { recursive: true });
+fs.mkdirSync(path.dirname(modelDatasetsPath), { recursive: true });
+fs.mkdirSync(path.dirname(modelTrainingJobsPath), { recursive: true });
+fs.mkdirSync(path.dirname(modelVersionsPath), { recursive: true });
+fs.mkdirSync(path.dirname(modelEvaluationsPath), { recursive: true });
 fs.mkdirSync(uploadRoot, { recursive: true });
 fs.mkdirSync(previewRoot, { recursive: true });
 
@@ -63,6 +70,43 @@ if (!fs.existsSync(analysisHistoryPath)) {
 
 if (!fs.existsSync(moduleConfigsPath)) {
   fs.writeFileSync(moduleConfigsPath, JSON.stringify({}, null, 2));
+}
+
+if (!fs.existsSync(modelDatasetsPath)) {
+  fs.writeFileSync(modelDatasetsPath, JSON.stringify([], null, 2));
+}
+
+if (!fs.existsSync(modelTrainingJobsPath)) {
+  fs.writeFileSync(modelTrainingJobsPath, JSON.stringify([], null, 2));
+}
+
+if (!fs.existsSync(modelVersionsPath)) {
+  fs.writeFileSync(
+    modelVersionsPath,
+    JSON.stringify(
+      [
+        {
+          id: "model-version-ppe-no-helmet-default",
+          name: "Construction Safety Baseline",
+          moduleKey: "ppe.no-helmet",
+          domain: "PPE",
+          labels: ["person", "hardhat", "no-hardhat"],
+          modelPath: defaultModelPath,
+          sourceJobId: null,
+          evaluationSummary: "Baseline model komunitas yang saat ini dipakai untuk inference PPE.",
+          status: "active",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      null,
+      2
+    )
+  );
+}
+
+if (!fs.existsSync(modelEvaluationsPath)) {
+  fs.writeFileSync(modelEvaluationsPath, JSON.stringify([], null, 2));
 }
 
 const resolvePythonCommand = () => {
@@ -95,6 +139,11 @@ const MAX_ANALYSIS_JOB_RETENTION = 50;
 const analysisJobs = new Map();
 const analysisJobQueue = [];
 let activeAnalysisJobId = null;
+const LIVE_MONITORING_POLL_INTERVAL_MS = 5000;
+const LIVE_MONITORING_CONTINUOUS_INTERVAL_SECONDS = 30;
+const LIVE_MONITORING_CLIP_DURATION_SECONDS = 4;
+const monitoringCaptureRoot = path.join(analysisOutputRoot, "monitoring-captures");
+const monitoringRuntime = new Map();
 
 const noHelmetPayloadSchema = z.object({
   mediaSourceId: z.string().trim().min(1).optional(),
@@ -120,7 +169,30 @@ const noHelmetPayloadSchema = z.object({
   violationLabels: z.array(z.string().trim().min(1)).optional(),
 });
 
+const noSafetyVestPayloadSchema = z.object({
+  mediaSourceId: z.string().trim().min(1).optional(),
+  videoPath: z.string().trim().min(1),
+  modelPath: z.string().trim().min(1),
+  roiConfigPath: z.string().trim().min(1).optional(),
+  roiId: z.string().trim().min(1).optional(),
+  roiNormalized: z.boolean().optional(),
+  roiPolygon: z
+    .array(z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]))
+    .min(3)
+    .optional(),
+  confidenceThreshold: z.number().min(0).max(1).optional(),
+  iouThreshold: z.number().min(0).max(1).optional(),
+  violationOnFrames: z.number().int().positive().optional(),
+  cleanOffFrames: z.number().int().positive().optional(),
+  frameStep: z.number().int().positive().optional(),
+  imageSize: z.number().int().positive().optional(),
+  personLabels: z.array(z.string().trim().min(1)).optional(),
+  vestLabels: z.array(z.string().trim().min(1)).optional(),
+  violationLabels: z.array(z.string().trim().min(1)).optional(),
+});
+
 const noSafetyVestConfigSchema = z.object({
+  modelSource: z.enum(["deployment-gate", "manual"]).default("deployment-gate"),
   modelPath: z.string().trim().min(1),
   roiId: z.string().trim().min(1),
   roiConfigPath: z.string(),
@@ -132,10 +204,13 @@ const noSafetyVestConfigSchema = z.object({
   cleanOffFrames: z.string().trim().min(1),
   frameStep: z.string().trim().min(1),
   imageSize: z.string().trim().min(1),
+  requiredPpe: z.string().trim().min(1),
+  alertCooldownSeconds: z.string().trim().min(1),
   operationalNotes: z.string(),
 });
 
 const safetyRulesConfigSchema = z.object({
+  modelSource: z.enum(["deployment-gate", "manual"]).default("deployment-gate"),
   ruleProfileName: z.string().trim().min(1),
   modelPath: z.string().trim().min(1),
   detectorLabels: z.string().trim().min(1),
@@ -152,14 +227,58 @@ const safetyRulesConfigSchema = z.object({
   incidentNarrativeTemplate: z.string().trim().min(1),
 });
 
+const noHelmetConfigSchema = z.object({
+  modelSource: z.enum(["deployment-gate", "manual"]).default("deployment-gate"),
+  modelPath: z.string().trim().min(1),
+  roiId: z.string().trim().min(1),
+  roiConfigPath: z.string(),
+  confidenceThreshold: z.string().trim().min(1),
+  iouThreshold: z.string().trim().min(1),
+  topRatio: z.string().trim().min(1),
+  helmetOverlapThreshold: z.string().trim().min(1),
+  violationOnFrames: z.string().trim().min(1),
+  cleanOffFrames: z.string().trim().min(1),
+  frameStep: z.string().trim().min(1),
+  imageSize: z.string().trim().min(1),
+  personLabels: z.string().trim().min(1),
+  helmetLabels: z.string().trim().min(1),
+  violationLabels: z.string(),
+  requiredPpe: z.string().trim().min(1),
+  alertCooldownSeconds: z.string().trim().min(1),
+  operationalNotes: z.string(),
+});
+
 const moduleConfigSchemas = {
+  "no-helmet": noHelmetConfigSchema,
   "no-safety-vest": noSafetyVestConfigSchema,
   "safety-rules": safetyRulesConfigSchema,
 };
 
 const defaultModuleConfigs = {
+  "no-helmet": {
+    modelSource: "deployment-gate",
+    modelPath: defaultModelPath,
+    roiId: "area-produksi-dashboard",
+    roiConfigPath: "",
+    confidenceThreshold: "0.40",
+    iouThreshold: "0.30",
+    topRatio: "0.30",
+    helmetOverlapThreshold: "0.20",
+    violationOnFrames: "4",
+    cleanOffFrames: "4",
+    frameStep: "2",
+    imageSize: "1280",
+    personLabels: "person",
+    helmetLabels: "hardhat",
+    violationLabels: "",
+    requiredPpe: "helmet, safety shoes",
+    alertCooldownSeconds: "90",
+    operationalNotes:
+      "Gunakan modul ini sebagai baseline inspeksi kepatuhan helm pada area produksi, jalur alat berat, dan titik kerja dengan risiko benda jatuh.",
+  },
   "no-safety-vest": {
-    modelPath: "/app/models/detect-construction-safety-best.pt",
+    modelSource: "deployment-gate",
+    modelPath: defaultModelPath,
     roiId: "area-produksi-vest",
     roiConfigPath: "",
     confidenceThreshold: "0.20",
@@ -170,12 +289,15 @@ const defaultModuleConfigs = {
     cleanOffFrames: "2",
     frameStep: "5",
     imageSize: "960",
+    requiredPpe: "safety vest, helmet, safety shoes",
+    alertCooldownSeconds: "90",
     operationalNotes:
       "Gunakan modul ini untuk inspeksi rompi keselamatan pada area produksi, loading point, dan jalur pejalan kaki.",
   },
   "safety-rules": {
+    modelSource: "deployment-gate",
     ruleProfileName: "General Site Safety",
-    modelPath: "/app/models/detect-construction-safety-best.pt",
+    modelPath: defaultModelPath,
     detectorLabels: "person, vehicle, hardhat, safety-vest",
     violationLabels: "restricted-area, no-hardhat, no-safety-vest",
     confidenceThreshold: "0.20",
@@ -193,8 +315,174 @@ const defaultModuleConfigs = {
   },
 };
 
+const PPE_ANALYSIS_DEFINITIONS = {
+  no_helmet: {
+    analysisType: "no_helmet",
+    eventType: "no_helmet",
+    moduleKey: "ppe.no-helmet",
+    configKey: "no-helmet",
+    findingType: "missing-helmet",
+    findingLabel: "no helmet",
+    title: "Pekerja tanpa helm terdeteksi",
+    detailLabel: "no helmet",
+    recommendation:
+      "Verifikasi visual di lapangan dan tindak lanjuti pelanggaran helm berulang.",
+    requiredPpe: ["helmet"],
+    labels: ["person", "helmet", "no-helmet"],
+    matchRegion: "head",
+  },
+  no_safety_vest: {
+    analysisType: "no_safety_vest",
+    eventType: "no_safety_vest",
+    moduleKey: "ppe.no-safety-vest",
+    configKey: "no-safety-vest",
+    findingType: "missing-safety-vest",
+    findingLabel: "no safety vest",
+    title: "Pekerja tanpa rompi keselamatan terdeteksi",
+    detailLabel: "no safety vest",
+    recommendation:
+      "Verifikasi visual di lapangan dan tindak lanjuti pelanggaran rompi keselamatan berulang.",
+    requiredPpe: ["safety vest"],
+    labels: ["person", "safety-vest", "no-safety-vest"],
+    matchRegion: "torso",
+    fallbackToMissingPositive: true,
+    vetoOnPositiveEvidence: true,
+  },
+};
+
 const hseSafetyRulesPayloadSchema = z.object({
   mediaSourceId: z.string().trim().min(1),
+});
+
+const modelDatasetSchema = z.object({
+  id: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  domain: z.enum(["PPE", "HSE"]),
+  labels: z.array(z.string().trim().min(1)),
+  sourceType: z.enum(["upload", "camera", "mixed"]),
+  imageCount: z.number().int().min(0),
+  annotationCount: z.number().int().min(0),
+  status: z.enum(["draft", "ready", "archived"]),
+  description: z.string(),
+  storagePath: z.string().trim().min(1),
+  createdAt: z.string().trim().min(1),
+  updatedAt: z.string().trim().min(1),
+});
+
+const createModelDatasetPayloadSchema = z.object({
+  name: z.string().trim().min(1),
+  domain: z.enum(["PPE", "HSE"]),
+  labels: z.array(z.string().trim().min(1)).min(1),
+  sourceType: z.enum(["upload", "camera", "mixed"]),
+  imageCount: z.number().int().min(0).default(0),
+  annotationCount: z.number().int().min(0).default(0),
+  status: z.enum(["draft", "ready", "archived"]).default("draft"),
+  description: z.string().default(""),
+  storagePath: z.string().trim().min(1),
+});
+
+const updateModelDatasetPayloadSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  domain: z.enum(["PPE", "HSE"]).optional(),
+  labels: z.array(z.string().trim().min(1)).min(1).optional(),
+  sourceType: z.enum(["upload", "camera", "mixed"]).optional(),
+  imageCount: z.number().int().min(0).optional(),
+  annotationCount: z.number().int().min(0).optional(),
+  status: z.enum(["draft", "ready", "archived"]).optional(),
+  description: z.string().optional(),
+  storagePath: z.string().trim().min(1).optional(),
+});
+
+const modelTrainingJobSchema = z.object({
+  id: z.string().trim().min(1),
+  datasetId: z.string().trim().min(1),
+  datasetName: z.string().trim().min(1),
+  domain: z.enum(["PPE", "HSE"]),
+  targetModule: z.enum(["ppe.no-helmet", "ppe.no-safety-vest", "hse.safety-rules"]),
+  baseModelPath: z.string().trim().min(1),
+  outputModelPath: z.string().trim().min(1).nullable(),
+  labels: z.array(z.string().trim().min(1)),
+  status: z.enum(["queued", "running", "completed", "failed"]),
+  epochs: z.number().int().min(1),
+  imageSize: z.number().int().min(1),
+  notes: z.string(),
+  metrics: z.record(z.number()),
+  createdAt: z.string().trim().min(1),
+  startedAt: z.string().trim().min(1).nullable(),
+  endedAt: z.string().trim().min(1).nullable(),
+  updatedAt: z.string().trim().min(1),
+});
+
+const createModelTrainingJobPayloadSchema = z.object({
+  datasetId: z.string().trim().min(1),
+  targetModule: z.enum(["ppe.no-helmet", "ppe.no-safety-vest", "hse.safety-rules"]),
+  baseModelPath: z.string().trim().min(1),
+  epochs: z.number().int().min(1).default(50),
+  imageSize: z.number().int().min(1).default(1280),
+  notes: z.string().default(""),
+});
+
+const updateModelTrainingJobPayloadSchema = z.object({
+  status: z.enum(["queued", "running", "completed", "failed"]).optional(),
+  outputModelPath: z.string().trim().min(1).nullable().optional(),
+  notes: z.string().optional(),
+  metrics: z.record(z.number()).optional(),
+});
+
+const modelVersionSchema = z.object({
+  id: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  moduleKey: z.enum(["ppe.no-helmet", "ppe.no-safety-vest", "hse.safety-rules"]),
+  domain: z.enum(["PPE", "HSE"]),
+  labels: z.array(z.string().trim().min(1)),
+  modelPath: z.string().trim().min(1),
+  sourceJobId: z.string().trim().min(1).nullable(),
+  evaluationSummary: z.string(),
+  status: z.enum(["candidate", "approved", "active", "rejected"]),
+  createdAt: z.string().trim().min(1),
+  updatedAt: z.string().trim().min(1),
+});
+
+const modelEvaluationSchema = z.object({
+  id: z.string().trim().min(1),
+  modelVersionId: z.string().trim().min(1),
+  modelName: z.string().trim().min(1),
+  moduleKey: z.enum(["ppe.no-helmet", "ppe.no-safety-vest", "hse.safety-rules"]),
+  domain: z.enum(["PPE", "HSE"]),
+  status: z.enum(["draft", "reviewed", "approved", "rejected"]),
+  precision: z.number().min(0).max(1).nullable(),
+  recall: z.number().min(0).max(1).nullable(),
+  map50: z.number().min(0).max(1).nullable(),
+  falsePositiveNotes: z.string(),
+  falseNegativeNotes: z.string(),
+  benchmarkNotes: z.string(),
+  createdAt: z.string().trim().min(1),
+  updatedAt: z.string().trim().min(1),
+});
+
+const createModelEvaluationPayloadSchema = z.object({
+  modelVersionId: z.string().trim().min(1),
+  status: z.enum(["draft", "reviewed", "approved", "rejected"]).default("draft"),
+  precision: z.number().min(0).max(1).nullable().default(null),
+  recall: z.number().min(0).max(1).nullable().default(null),
+  map50: z.number().min(0).max(1).nullable().default(null),
+  falsePositiveNotes: z.string().default(""),
+  falseNegativeNotes: z.string().default(""),
+  benchmarkNotes: z.string().default(""),
+});
+
+const updateModelEvaluationPayloadSchema = z.object({
+  status: z.enum(["draft", "reviewed", "approved", "rejected"]).optional(),
+  precision: z.number().min(0).max(1).nullable().optional(),
+  recall: z.number().min(0).max(1).nullable().optional(),
+  map50: z.number().min(0).max(1).nullable().optional(),
+  falsePositiveNotes: z.string().optional(),
+  falseNegativeNotes: z.string().optional(),
+  benchmarkNotes: z.string().optional(),
+});
+
+const updateModelVersionPayloadSchema = z.object({
+  status: z.enum(["candidate", "approved", "active", "rejected"]),
 });
 
 app.use("/analysis-output", express.static(analysisOutputRoot));
@@ -383,7 +671,26 @@ const appendAnalysisHistory = (entry) => {
   return entry;
 };
 
-const getModuleConfig = (moduleKey) => {
+const modelTargetModuleByConfigKey = {
+  "no-helmet": "ppe.no-helmet",
+  "no-safety-vest": "ppe.no-safety-vest",
+  "safety-rules": "hse.safety-rules",
+};
+
+const getActiveModelVersion = (moduleKey) => {
+  if (!moduleKey) {
+    return null;
+  }
+
+  return (
+    readModelVersions()
+      .filter((item) => item.moduleKey === moduleKey)
+      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
+      .find((item) => item.status === "active") || null
+  );
+};
+
+const resolveModuleConfigEnvelope = (moduleKey) => {
   const schema = moduleConfigSchemas[moduleKey];
   const fallback = defaultModuleConfigs[moduleKey];
   if (!schema || !fallback) {
@@ -391,8 +698,52 @@ const getModuleConfig = (moduleKey) => {
   }
 
   const items = readModuleConfigs();
-  const parsed = schema.safeParse(items[moduleKey] || fallback);
-  return parsed.success ? parsed.data : fallback;
+  const config = {
+    ...fallback,
+    ...(items[moduleKey] || {}),
+  };
+  const parsed = schema.safeParse(config);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.flatten(),
+    };
+  }
+
+  const targetModuleKey = modelTargetModuleByConfigKey[moduleKey];
+  const activeModel = getActiveModelVersion(targetModuleKey);
+  const usesDeploymentGate = parsed.data.modelSource !== "manual";
+  let resolvedModelPath =
+    usesDeploymentGate && activeModel?.modelPath
+      ? activeModel.modelPath
+      : parsed.data.modelPath;
+  const looksLikeContainerPath = String(resolvedModelPath || "").trim().startsWith("/app/");
+  if (looksLikeContainerPath && !fileExists(resolvedModelPath) && fileExists(defaultModelPath)) {
+    resolvedModelPath = activeModel?.modelPath && fileExists(activeModel.modelPath)
+      ? activeModel.modelPath
+      : defaultModelPath;
+  }
+
+  return {
+    ok: true,
+    activeModel,
+    targetModuleKey,
+    config: {
+      ...parsed.data,
+      modelPath: resolvedModelPath,
+    },
+    resolvedModelPath,
+    usesDeploymentGate,
+  };
+};
+
+const getModuleConfig = (moduleKey) => {
+  const resolved = resolveModuleConfigEnvelope(moduleKey);
+  if (!resolved?.ok) {
+    return defaultModuleConfigs[moduleKey] || null;
+  }
+
+  return resolved.config;
 };
 
 const readModuleConfigs = () => {
@@ -411,10 +762,234 @@ const writeModuleConfigs = (items) => {
   return items;
 };
 
+const readModelDatasets = () => {
+  if (!fileExists(modelDatasetsPath)) {
+    fs.writeFileSync(modelDatasetsPath, JSON.stringify([], null, 2));
+    return [];
+  }
+
+  const raw = fs.readFileSync(modelDatasetsPath, "utf8");
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed)
+    ? parsed
+        .map((item) => modelDatasetSchema.safeParse(item))
+        .filter((result) => result.success)
+        .map((result) => result.data)
+    : [];
+};
+
+const writeModelDatasets = (items) => {
+  fs.writeFileSync(modelDatasetsPath, JSON.stringify(items, null, 2));
+  return items;
+};
+
+const readModelTrainingJobs = () => {
+  if (!fileExists(modelTrainingJobsPath)) {
+    fs.writeFileSync(modelTrainingJobsPath, JSON.stringify([], null, 2));
+    return [];
+  }
+
+  const raw = fs.readFileSync(modelTrainingJobsPath, "utf8");
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed)
+    ? parsed
+        .map((item) => modelTrainingJobSchema.safeParse(item))
+        .filter((result) => result.success)
+        .map((result) => result.data)
+    : [];
+};
+
+const writeModelTrainingJobs = (items) => {
+  fs.writeFileSync(modelTrainingJobsPath, JSON.stringify(items, null, 2));
+  return items;
+};
+
+const readModelVersions = () => {
+  if (!fileExists(modelVersionsPath)) {
+    fs.writeFileSync(modelVersionsPath, JSON.stringify([], null, 2));
+    return [];
+  }
+
+  const raw = fs.readFileSync(modelVersionsPath, "utf8");
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed)
+    ? parsed
+        .map((item) => modelVersionSchema.safeParse(item))
+        .filter((result) => result.success)
+        .map((result) => result.data)
+    : [];
+};
+
+const writeModelVersions = (items) => {
+  fs.writeFileSync(modelVersionsPath, JSON.stringify(items, null, 2));
+  return items;
+};
+
+const readModelEvaluations = () => {
+  if (!fileExists(modelEvaluationsPath)) {
+    fs.writeFileSync(modelEvaluationsPath, JSON.stringify([], null, 2));
+    return [];
+  }
+
+  const raw = fs.readFileSync(modelEvaluationsPath, "utf8");
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed)
+    ? parsed
+        .map((item) => modelEvaluationSchema.safeParse(item))
+        .filter((result) => result.success)
+        .map((result) => result.data)
+    : [];
+};
+
+const writeModelEvaluations = (items) => {
+  fs.writeFileSync(modelEvaluationsPath, JSON.stringify(items, null, 2));
+  return items;
+};
+
+const buildModelsOverview = () => {
+  const datasets = readModelDatasets();
+  const trainingJobs = readModelTrainingJobs();
+  const modelVersions = readModelVersions();
+
+  return {
+    totals: {
+      datasets: datasets.length,
+      readyDatasets: datasets.filter((item) => item.status === "ready").length,
+      draftDatasets: datasets.filter((item) => item.status === "draft").length,
+      trainingJobs: trainingJobs.length,
+      runningTrainingJobs: trainingJobs.filter((item) => item.status === "running").length,
+      modelVersions: modelVersions.length,
+      activeModels: modelVersions.filter((item) => item.status === "active").length,
+    },
+    domainSplit: {
+      PPE: datasets.filter((item) => item.domain === "PPE").length,
+      HSE: datasets.filter((item) => item.domain === "HSE").length,
+    },
+    activeModelsByModule: modelVersions
+      .filter((item) => item.status === "active")
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        moduleKey: item.moduleKey,
+        domain: item.domain,
+        labels: item.labels,
+        modelPath: item.modelPath,
+        updatedAt: item.updatedAt,
+      })),
+    latestDatasetAt:
+      datasets.length > 0
+        ? datasets
+            .map((item) => item.updatedAt)
+            .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0]
+        : null,
+  };
+};
+
+const isTrainingJobCompatibleWithDataset = (job, dataset) => {
+  if (dataset.domain === "PPE") {
+    return job.targetModule === "ppe.no-helmet" || job.targetModule === "ppe.no-safety-vest";
+  }
+  if (dataset.domain === "HSE") {
+    return job.targetModule === "hse.safety-rules";
+  }
+  return false;
+};
+
+const buildCandidateModelVersionFromTrainingJob = (job) => {
+  if (!job.outputModelPath || job.status !== "completed") {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  return {
+    id: `model-version-${job.id}`,
+    name: `${job.datasetName} Candidate`,
+    moduleKey: job.targetModule,
+    domain: job.domain,
+    labels: job.labels,
+    modelPath: job.outputModelPath,
+    sourceJobId: job.id,
+    evaluationSummary:
+      "Kandidat model hasil training job. Menunggu evaluasi lapangan dan approval sebelum bisa dijadikan active.",
+    status: "candidate",
+    createdAt: now,
+    updatedAt: now,
+  };
+};
+
+const syncModelVersionForTrainingJob = (job) => {
+  const modelVersions = readModelVersions();
+  const existingIndex = modelVersions.findIndex((item) => item.sourceJobId === job.id);
+  const candidate = buildCandidateModelVersionFromTrainingJob(job);
+
+  if (!candidate) {
+    if (existingIndex >= 0 && modelVersions[existingIndex].status === "candidate") {
+      modelVersions.splice(existingIndex, 1);
+      writeModelVersions(modelVersions);
+    }
+    return;
+  }
+
+  if (existingIndex >= 0) {
+    modelVersions[existingIndex] = {
+      ...modelVersions[existingIndex],
+      ...candidate,
+      createdAt: modelVersions[existingIndex].createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    modelVersions.unshift(candidate);
+  }
+
+  writeModelVersions(modelVersions);
+};
+
+const buildEvaluationSummary = (evaluation) => {
+  const metricParts = [
+    typeof evaluation.precision === "number" ? `P ${evaluation.precision.toFixed(2)}` : null,
+    typeof evaluation.recall === "number" ? `R ${evaluation.recall.toFixed(2)}` : null,
+    typeof evaluation.map50 === "number" ? `mAP50 ${evaluation.map50.toFixed(2)}` : null,
+  ].filter(Boolean);
+
+  return metricParts.length > 0
+    ? `Evaluation ${evaluation.status}: ${metricParts.join(" • ")}`
+    : `Evaluation ${evaluation.status} tanpa metrik numerik.`;
+};
+
+const syncModelVersionForEvaluation = (evaluation) => {
+  const modelVersions = readModelVersions();
+  const index = modelVersions.findIndex((item) => item.id === evaluation.modelVersionId);
+  if (index === -1) {
+    return;
+  }
+
+  const current = modelVersions[index];
+  const nextStatus =
+    evaluation.status === "approved"
+      ? current.status === "active"
+        ? "active"
+        : "approved"
+      : evaluation.status === "rejected"
+        ? current.status === "active"
+          ? "active"
+          : "rejected"
+        : current.status;
+
+  modelVersions[index] = {
+    ...current,
+    status: nextStatus,
+    evaluationSummary: buildEvaluationSummary(evaluation),
+    updatedAt: new Date().toISOString(),
+  };
+
+  writeModelVersions(modelVersions);
+};
+
 const ensureAnalysisDirectories = () => {
   fs.mkdirSync(analysisOutputRoot, { recursive: true });
   fs.mkdirSync(uploadRoot, { recursive: true });
   fs.mkdirSync(previewRoot, { recursive: true });
+  fs.mkdirSync(monitoringCaptureRoot, { recursive: true });
 };
 
 const requireBinary = async (binaryName) => {
@@ -487,19 +1062,169 @@ const publicSnapshotUrl = (req, snapshotPath) => {
   return `${req.protocol}://${req.get("host")}/analysis-output/${encodedPath}`;
 };
 
-const enrichSummary = (req, summary) => ({
-  ...summary,
-  events: Array.isArray(summary.events)
+const severityToRiskScore = (severity) => {
+  if (severity === "high") return 90;
+  if (severity === "medium") return 65;
+  return 30;
+};
+
+const getPpeAnalysisDefinition = (analysisType) => {
+  if (!analysisType) {
+    return PPE_ANALYSIS_DEFINITIONS.no_helmet;
+  }
+
+  return (
+    Object.values(PPE_ANALYSIS_DEFINITIONS).find((item) => item.analysisType === analysisType) ||
+    PPE_ANALYSIS_DEFINITIONS.no_helmet
+  );
+};
+
+const buildPpeAnalysisFindings = (summary, context = {}) => {
+  const events = Array.isArray(summary.events) ? summary.events : [];
+  const detectedAnalysisType =
+    context.analysisType ||
+    events.find((event) => typeof event?.event_type === "string")?.event_type ||
+    "no_helmet";
+  const definition = getPpeAnalysisDefinition(detectedAnalysisType);
+  const runId = context.runId || `run-${Date.now()}`;
+  const createdAt = context.createdAt || new Date().toISOString();
+  const sourceId = context.sourceId || "";
+  const sourceName = context.sourceName || "Unknown Source";
+  const sourceLocation = context.sourceLocation || "";
+  const sourceType = context.sourceType || "upload";
+  const outputDir = context.outputDir || null;
+  const configSnapshot = context.configSnapshot || {};
+
+  return events.map((event) => {
+    const durationSeconds = Math.max(0, Number(event.end_time_seconds || 0) - Number(event.start_time_seconds || 0));
+    const riskScore = Math.max(30, Math.min(95, Math.round(Number(event.max_confidence || 0) * 100)));
+    const snapshotUrl = event.snapshotUrl || null;
+    const isUncertain = event.status === "uncertain";
+    return {
+      id: `finding-${event.event_id}`,
+      runId,
+      sourceId,
+      sourceName,
+      sourceLocation,
+      sourceType,
+      category: "PPE",
+      moduleKey: definition.moduleKey,
+      findingType: definition.findingType,
+      title: isUncertain
+        ? `Indikasi ${definition.detailLabel} perlu verifikasi`
+        : definition.title,
+      detail: isUncertain
+        ? `Detector menemukan indikasi ${definition.detailLabel} pada track ${event.track_id} di ROI ${event.roi_id}, tetapi confidence positif PPE pada track ini belum cukup konsisten untuk dijadikan violation final.`
+        : `Detector menemukan event ${definition.detailLabel} pada track ${event.track_id} di ROI ${event.roi_id}.`,
+      recommendation: definition.recommendation,
+      severity: isUncertain ? "low" : riskScore >= 80 ? "high" : "medium",
+      status: isUncertain ? "uncertain" : "open",
+      riskScore,
+      metric: `${durationSeconds.toFixed(1)} s • conf ${Number(event.max_confidence || 0).toFixed(2)}`,
+      eventCount: isUncertain ? 0 : 1,
+      violatorCount: isUncertain ? 0 : 1,
+      startsAtSeconds: Number(event.start_time_seconds || 0),
+      endsAtSeconds: Number(event.end_time_seconds || 0),
+      durationSeconds,
+      roiId: event.roi_id || null,
+      zoneIds: [],
+      requiredPpe: definition.requiredPpe,
+      trackIds: Number.isFinite(Number(event.track_id)) ? [Number(event.track_id)] : [],
+      labels: definition.labels,
+      snapshotUrl,
+      evidenceUrls: snapshotUrl ? [snapshotUrl] : [],
+      detectorEvidence: {
+        analysisType: definition.analysisType,
+        outputDir,
+        createdAt,
+      },
+      configSnapshot,
+      metadata: {
+        eventId: event.event_id,
+        maxConfidence: Number(event.max_confidence || 0),
+        eventStatus: event.status || "violation",
+        detectionMode: event.detection_mode || "direct",
+      },
+      createdAt,
+      updatedAt: createdAt,
+    };
+  });
+};
+
+const buildHseAnalysisFindings = (source, config, findings, context = {}) => {
+  const runId = context.runId || `hse-run-${Date.now()}`;
+  const createdAt = context.createdAt || new Date().toISOString();
+  const outputDir = context.outputDir || null;
+  const zoneIds = splitCommaSeparated(config.restrictedZones).map((item) =>
+    String(item).toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+  );
+  const requiredPpe = splitCommaSeparated(config.requiredPpe);
+
+  return findings.map((finding) => ({
+    id: `finding-${finding.id}`,
+    runId,
+    sourceId: source.id,
+    sourceName: source.name,
+    sourceLocation: source.location || "",
+    sourceType: source.type,
+    category: "HSE",
+    moduleKey: "hse.safety-rules",
+    findingType: finding.id,
+    title: finding.title,
+    detail: finding.detail,
+    recommendation: finding.recommendation,
+    severity: finding.severity,
+    status: finding.status === "resolved" ? "resolved" : "open",
+    riskScore: severityToRiskScore(finding.severity),
+    metric: finding.metric || null,
+    eventCount: finding.metric ? 1 : 0,
+    violatorCount: finding.severity === "high" ? 1 : 0,
+    startsAtSeconds: null,
+    endsAtSeconds: null,
+    durationSeconds: null,
+    roiId: null,
+    zoneIds,
+    requiredPpe,
+    trackIds: [],
+    labels: [],
+    snapshotUrl: null,
+    evidenceUrls: [],
+    detectorEvidence: {
+      analysisType: context.latestEvidenceAnalysisType || null,
+      outputDir,
+      createdAt,
+    },
+    configSnapshot: config,
+    metadata: {
+      sourceStatus: source.status,
+      monitoringStatus: source.monitoringStatus,
+    },
+    createdAt,
+    updatedAt: createdAt,
+  }));
+};
+
+const enrichSummary = (req, summary, context = {}) => {
+  const events = Array.isArray(summary.events)
     ? summary.events.map((event) => ({
         ...event,
         snapshotUrl: event.snapshot_path
           ? publicSnapshotUrl(req, event.snapshot_path)
           : null,
       }))
-    : [],
-});
+    : [];
 
-const readRunSummary = (req, outputDir) => {
+  return {
+    ...summary,
+    events,
+    analysisFindings: buildPpeAnalysisFindings(
+      { ...summary, events },
+      context
+    ),
+  };
+};
+
+const readRunSummary = (req, outputDir, context = {}) => {
   if (!outputDir || !fileExists(outputDir)) {
     return null;
   }
@@ -511,7 +1236,7 @@ const readRunSummary = (req, outputDir) => {
 
   try {
     const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
-    return enrichSummary(req, summary);
+    return enrichSummary(req, summary, context);
   } catch (_error) {
     return null;
   }
@@ -522,8 +1247,17 @@ const buildLatestAnalysisSummary = (req, run) => {
     return null;
   }
 
-  const latestRunSummary = readRunSummary(req, run.outputDir);
+  const latestRunSummary = readRunSummary(req, run.outputDir, {
+    analysisType: run.analysisType,
+    runId: run.id,
+    outputDir: run.outputDir,
+    createdAt: run.createdAt,
+    sourceId: run.mediaSourceId || "",
+    sourceName: run.sourceName || "",
+    sourceLocation: run.location || "",
+  });
   const latestGlobalSummary = latestRunSummary?.global_summary || null;
+  const definition = getPpeAnalysisDefinition(run.analysisType);
 
   return {
     id: run.id,
@@ -549,8 +1283,11 @@ const buildLatestAnalysisSummary = (req, run) => {
     narrative:
       latestGlobalSummary?.narrative ||
       (Number(run.eventCount || 0) > 0
-        ? `Run terakhir menemukan ${run.eventCount} event no helmet pada source ${run.sourceName}.`
-        : `Run terakhir pada source ${run.sourceName} tidak menemukan event no helmet.`),
+        ? `Run terakhir menemukan ${run.eventCount} event ${definition.findingLabel} pada source ${run.sourceName}.`
+        : `Run terakhir pada source ${run.sourceName} tidak menemukan event ${definition.findingLabel}.`),
+    analysisFindings: Array.isArray(latestRunSummary?.analysisFindings)
+      ? latestRunSummary.analysisFindings
+      : [],
     events: Array.isArray(latestRunSummary?.events)
       ? latestRunSummary.events.slice(0, 6)
       : [],
@@ -573,21 +1310,54 @@ const getLatestRunForSource = (analysisType, mediaSource) => {
   );
 };
 
+const PPE_ANALYSIS_TYPES = new Set(["no_helmet", "no_safety_vest"]);
+const LIVE_ALERT_WINDOW_MS = 5 * 60 * 1000;
+
+const getPpeAnalysisHistory = () =>
+  readAnalysisHistory().filter((item) => PPE_ANALYSIS_TYPES.has(item.analysisType));
+
+const getRunsForSource = (runs, mediaSource) =>
+  runs.filter(
+    (run) => run.mediaSourceId === mediaSource.id || run.videoPath === mediaSource.source
+  );
+
+const getLatestDetectionRun = (runs) =>
+  runs.find((run) => Number(run.eventCount || 0) > 0) || null;
+
+const isRecentAlert = (createdAt) => {
+  if (!createdAt) {
+    return false;
+  }
+
+  const timestamp = new Date(createdAt).getTime();
+  if (!Number.isFinite(timestamp)) {
+    return false;
+  }
+
+  return Date.now() - timestamp <= LIVE_ALERT_WINDOW_MS;
+};
+
 const severityRank = {
   low: 1,
   medium: 2,
   high: 3,
 };
 
-const buildHseSafetyRulesReport = (req, source, config) => {
+const buildHseSafetyRulesReport = (req, source, config, context = {}) => {
   const latestNoHelmetRun = getLatestRunForSource("no_helmet", source);
   const latestNoHelmetSummary = latestNoHelmetRun
     ? buildLatestAnalysisSummary(req, latestNoHelmetRun)
+    : null;
+  const latestNoSafetyVestRun = getLatestRunForSource("no_safety_vest", source);
+  const latestNoSafetyVestSummary = latestNoSafetyVestRun
+    ? buildLatestAnalysisSummary(req, latestNoSafetyVestRun)
     : null;
   const requiredPpe = splitCommaSeparated(config.requiredPpe);
   const restrictedZones = splitCommaSeparated(config.restrictedZones);
   const findings = [];
   const readiness = [];
+  const requiresHelmet = requiredPpe.some((item) => /helmet/i.test(item));
+  const requiresSafetyVest = requiredPpe.some((item) => /safety\s*vest|vest/i.test(item));
 
   const modelReady = fileExists(config.modelPath);
   readiness.push({
@@ -672,7 +1442,7 @@ const buildHseSafetyRulesReport = (req, source, config) => {
   }
 
   if (latestNoHelmetSummary) {
-    if (requiredPpe.some((item) => /helmet/i.test(item)) && latestNoHelmetSummary.violatorCount > 0) {
+    if (requiresHelmet && latestNoHelmetSummary.violatorCount > 0) {
       findings.push({
         id: "helmet-violation",
         title: "Pelanggaran helm terdeteksi pada baseline HSE",
@@ -683,13 +1453,68 @@ const buildHseSafetyRulesReport = (req, source, config) => {
         metric: `${latestNoHelmetSummary.eventCount} event / ${latestNoHelmetSummary.violatorCount} violator`,
       });
     }
-  } else {
+  } else if (requiresHelmet) {
+    findings.push({
+      id: "missing-helmet-evidence",
+      title: "Belum ada evidence helmet untuk source ini",
+      severity: "medium",
+      status: "open",
+      detail: "Belum ada run PPE • No Helmet yang bisa dipakai sebagai baseline evidence HSE untuk source ini.",
+      recommendation: "Jalankan analisis PPE • No Helmet terlebih dulu atau aktifkan monitoring camera agar baseline HSE punya evidence visual.",
+    });
+  }
+
+  if (latestNoSafetyVestSummary) {
+    if (requiresSafetyVest && latestNoSafetyVestSummary.violatorCount > 0) {
+      findings.push({
+        id: "safety-vest-violation",
+        title: "Pelanggaran rompi keselamatan terdeteksi pada baseline HSE",
+        severity: latestNoSafetyVestSummary.violatorCount >= 2 ? "high" : "medium",
+        status: "open",
+        detail: `Run terakhir menemukan ${latestNoSafetyVestSummary.eventCount} event dan ${latestNoSafetyVestSummary.violatorCount} track pelanggar untuk aturan rompi keselamatan.`,
+        recommendation: "Lakukan inspeksi lapangan, pastikan area wajib rompi dipatuhi, dan tindak lanjuti pelanggaran berulang.",
+        metric: `${latestNoSafetyVestSummary.eventCount} event / ${latestNoSafetyVestSummary.violatorCount} violator`,
+      });
+    }
+  } else if (requiresSafetyVest) {
+    findings.push({
+      id: "missing-safety-vest-evidence",
+      title: "Belum ada evidence rompi keselamatan untuk source ini",
+      severity: "medium",
+      status: "open",
+      detail: "Belum ada run PPE • No Safety Vest yang bisa dipakai sebagai baseline evidence HSE untuk source ini.",
+      recommendation: "Jalankan analisis PPE • No Safety Vest terlebih dulu agar HSE punya evidence visual rompi keselamatan.",
+    });
+  }
+
+  if (
+    requiresHelmet &&
+    requiresSafetyVest &&
+    latestNoHelmetSummary &&
+    latestNoSafetyVestSummary &&
+    (latestNoHelmetSummary.violatorCount > 0 || latestNoSafetyVestSummary.violatorCount > 0)
+  ) {
+    findings.push({
+      id: "ppe-compliance-pattern",
+      title: "Baseline PPE menunjukkan pola kepatuhan yang perlu ditinjau",
+      severity:
+        latestNoHelmetSummary.violatorCount + latestNoSafetyVestSummary.violatorCount >= 3
+          ? "high"
+          : "medium",
+      status: "open",
+      detail: `Evidence PPE terbaru menunjukkan ${latestNoHelmetSummary.violatorCount} track pelanggar helm dan ${latestNoSafetyVestSummary.violatorCount} track pelanggar rompi keselamatan.`,
+      recommendation: "Audit area kerja, evaluasi briefing keselamatan, dan pastikan PPE wajib dipenuhi secara konsisten pada source ini.",
+      metric: `${latestNoHelmetSummary.violatorCount} helmet / ${latestNoSafetyVestSummary.violatorCount} vest`,
+    });
+  }
+
+  if (!latestNoHelmetSummary && !latestNoSafetyVestSummary) {
     findings.push({
       id: "missing-evidence",
       title: "Belum ada evidence analitik untuk source ini",
       severity: "medium",
       status: "open",
-      detail: "Belum ada run PPE • No Helmet yang bisa dipakai sebagai baseline evidence HSE untuk source ini.",
+      detail: "Belum ada run PPE yang bisa dipakai sebagai baseline evidence HSE untuk source ini.",
       recommendation: "Jalankan analisis PPE terlebih dulu atau aktifkan monitoring camera agar baseline HSE punya evidence visual.",
     });
   }
@@ -702,6 +1527,15 @@ const buildHseSafetyRulesReport = (req, source, config) => {
     findings.length === 0 ? "low" : highestSeverity === "high" ? "high" : highestSeverity === "medium" ? "medium" : "low";
 
   const readyCount = readiness.filter((item) => item.status === "ready").length;
+  const latestSnapshotUrl =
+    latestNoHelmetSummary?.events.find((event) => event.snapshotUrl)?.snapshotUrl || null;
+  const analysisFindings = buildHseAnalysisFindings(source, config, findings, {
+    runId: context.runId,
+    createdAt: context.createdAt,
+    outputDir: context.outputDir,
+    latestEvidenceAnalysisType: latestNoHelmetSummary?.analysisType || null,
+    latestSnapshotUrl,
+  });
 
   return {
     source: {
@@ -730,11 +1564,39 @@ const buildHseSafetyRulesReport = (req, source, config) => {
           snapshotCount: latestNoHelmetSummary.snapshotCount,
           narrative: latestNoHelmetSummary.narrative,
           outputDir: latestNoHelmetSummary.outputDir,
-          latestSnapshotUrl:
-            latestNoHelmetSummary.events.find((event) => event.snapshotUrl)?.snapshotUrl || null,
+          latestSnapshotUrl,
         }
       : null,
+    latestEvidenceByModule: {
+      noHelmet: latestNoHelmetSummary
+        ? {
+            analysisType: latestNoHelmetSummary.analysisType,
+            createdAt: latestNoHelmetSummary.createdAt,
+            eventCount: latestNoHelmetSummary.eventCount,
+            violatorCount: latestNoHelmetSummary.violatorCount,
+            snapshotCount: latestNoHelmetSummary.snapshotCount,
+            narrative: latestNoHelmetSummary.narrative,
+            outputDir: latestNoHelmetSummary.outputDir,
+            latestSnapshotUrl,
+          }
+        : null,
+      noSafetyVest: latestNoSafetyVestSummary
+        ? {
+            analysisType: latestNoSafetyVestSummary.analysisType,
+            createdAt: latestNoSafetyVestSummary.createdAt,
+            eventCount: latestNoSafetyVestSummary.eventCount,
+            violatorCount: latestNoSafetyVestSummary.violatorCount,
+            snapshotCount: latestNoSafetyVestSummary.snapshotCount,
+            narrative: latestNoSafetyVestSummary.narrative,
+            outputDir: latestNoSafetyVestSummary.outputDir,
+            latestSnapshotUrl:
+              latestNoSafetyVestSummary?.events.find((event) => event.snapshotUrl)?.snapshotUrl ||
+              null,
+          }
+        : null,
+    },
     findings,
+    analysisFindings,
     summary: {
       riskLevel: outputRiskLevel,
       openFindingCount: findings.length,
@@ -743,6 +1605,8 @@ const buildHseSafetyRulesReport = (req, source, config) => {
       lowSeverityCount: findings.filter((item) => item.severity === "low").length,
       latestNoHelmetEventCount: latestNoHelmetSummary?.eventCount || 0,
       latestNoHelmetViolatorCount: latestNoHelmetSummary?.violatorCount || 0,
+      latestNoSafetyVestEventCount: latestNoSafetyVestSummary?.eventCount || 0,
+      latestNoSafetyVestViolatorCount: latestNoSafetyVestSummary?.violatorCount || 0,
       requiredPpe,
       restrictedZones,
       generatedAt: new Date().toISOString(),
@@ -774,6 +1638,10 @@ const readHseSafetyRulesReport = (outputDir) => {
 const sanitizeAnalysisJobForResponse = (req, job) => {
   if (!job) return null;
 
+  const mediaSource = job.mediaSourceId
+    ? readMediaRegistry().find((item) => item.id === job.mediaSourceId) || null
+    : null;
+
   const queueIndex =
     job.status === "queued" ? analysisJobQueue.findIndex((item) => item === job.id) : -1;
 
@@ -793,7 +1661,19 @@ const sanitizeAnalysisJobForResponse = (req, job) => {
       videoPath: job.videoPath,
       stdout: job.stdout || "",
       stderr: job.stderr || "",
-      summary: job.summary ? enrichSummary(req, job.summary) : null,
+      summary: job.summary
+        ? enrichSummary(req, job.summary, {
+            analysisType: job.analysisType,
+            runId: job.runId,
+            outputDir: job.outputDir,
+            createdAt: job.completedAt || job.failedAt || job.createdAt,
+            sourceId: mediaSource?.id || job.mediaSourceId || "",
+            sourceName: mediaSource?.name || "",
+            sourceLocation: mediaSource?.location || "",
+            sourceType: mediaSource?.type || "upload",
+            configSnapshot: job.configSnapshot || {},
+          })
+        : null,
       queuePosition: queueIndex >= 0 ? queueIndex + 1 : 0,
     },
   };
@@ -813,7 +1693,8 @@ const pruneAnalysisJobs = () => {
   });
 };
 
-const buildNoHelmetAnalysisJob = (payload) => {
+const buildPpeAnalysisJob = (analysisType, payload) => {
+  const definition = getPpeAnalysisDefinition(analysisType);
   const {
     mediaSourceId,
     videoPath,
@@ -832,6 +1713,7 @@ const buildNoHelmetAnalysisJob = (payload) => {
     imageSize,
     personLabels,
     helmetLabels,
+    vestLabels,
     violationLabels,
   } = payload;
 
@@ -889,6 +1771,12 @@ const buildNoHelmetAnalysisJob = (payload) => {
     outputDir,
     "--model-path",
     modelPath,
+    "--event-type",
+    definition.eventType,
+    "--finding-label",
+    definition.findingLabel,
+    "--match-region",
+    definition.matchRegion,
   ];
 
   const appendNumberArg = (flag, value) => {
@@ -896,6 +1784,13 @@ const buildNoHelmetAnalysisJob = (payload) => {
       commandArgs.push(flag, String(value));
     }
   };
+
+  if (definition.fallbackToMissingPositive) {
+    commandArgs.push("--fallback-to-missing-positive");
+  }
+  if (definition.vetoOnPositiveEvidence) {
+    commandArgs.push("--veto-on-positive-evidence");
+  }
 
   appendNumberArg("--confidence-threshold", confidenceThreshold);
   appendNumberArg("--iou-threshold", iouThreshold);
@@ -909,7 +1804,8 @@ const buildNoHelmetAnalysisJob = (payload) => {
   (personLabels || []).forEach((label) => {
     commandArgs.push("--person-label", label);
   });
-  (helmetLabels || []).forEach((label) => {
+  const effectivePositiveLabels = helmetLabels || vestLabels || [];
+  effectivePositiveLabels.forEach((label) => {
     commandArgs.push("--helmet-label", label);
   });
   (violationLabels || []).forEach((label) => {
@@ -919,6 +1815,8 @@ const buildNoHelmetAnalysisJob = (payload) => {
   return {
     id: jobId,
     runId,
+    analysisType: definition.analysisType,
+    moduleKey: definition.moduleKey,
     mediaSourceId: mediaSourceId || null,
     videoPath,
     outputDir,
@@ -932,10 +1830,15 @@ const buildNoHelmetAnalysisJob = (payload) => {
     stdout: "",
     stderr: "",
     summary: null,
+    configSnapshot: payload,
   };
 };
 
-const executeNoHelmetAnalysisJob = async (job) => {
+const buildNoHelmetAnalysisJob = (payload) => buildPpeAnalysisJob("no_helmet", payload);
+
+const buildNoSafetyVestAnalysisJob = (payload) => buildPpeAnalysisJob("no_safety_vest", payload);
+
+const executePpeAnalysisJob = async (job) => {
   job.status = "running";
   job.message = "Analisis sedang berjalan di background worker.";
   job.startedAt = new Date().toISOString();
@@ -959,7 +1862,7 @@ const executeNoHelmetAnalysisJob = async (job) => {
 
     appendAnalysisHistory({
       id: job.runId,
-      analysisType: "no_helmet",
+      analysisType: job.analysisType,
       mediaSourceId: mediaSource?.id || null,
       sourceName: mediaSource?.name || path.basename(job.videoPath),
       location: mediaSource?.location || null,
@@ -1005,7 +1908,7 @@ const processNextAnalysisJob = () => {
 
   activeAnalysisJobId = nextJobId;
 
-  executeNoHelmetAnalysisJob(job)
+  executePpeAnalysisJob(job)
     .catch(() => {
       // Execution errors are already captured into the job state.
     })
@@ -1021,6 +1924,162 @@ const enqueueAnalysisJob = (job) => {
   analysisJobQueue.push(job.id);
   processNextAnalysisJob();
   return job;
+};
+
+const getMonitoringIntervalSeconds = (source) =>
+  source.executionMode === "scheduled"
+    ? Number(source.monitoringIntervalSeconds || 15)
+    : LIVE_MONITORING_CONTINUOUS_INTERVAL_SECONDS;
+
+const hasPendingMonitoringJob = (sourceId) =>
+  Array.from(analysisJobs.values()).some(
+    (job) =>
+      job.mediaSourceId === sourceId && (job.status === "queued" || job.status === "running")
+  );
+
+const buildMonitoringClipPath = (source) =>
+  path.join(
+    monitoringCaptureRoot,
+    `${Date.now()}-${sanitizeFilename(source.name || source.id)}.mp4`
+  );
+
+const captureMonitoringClip = async (source, outputPath) => {
+  await requireBinary("ffmpeg");
+  const normalizedSource = source.source.trim().toLowerCase();
+  const ffmpegArgs = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-rw_timeout",
+    "10000000",
+  ];
+
+  if (normalizedSource.startsWith("rtsp://")) {
+    ffmpegArgs.push("-rtsp_transport", "tcp");
+  }
+
+  ffmpegArgs.push(
+    "-i",
+    source.source,
+    "-t",
+    String(LIVE_MONITORING_CLIP_DURATION_SECONDS),
+    "-an",
+    "-vf",
+    "fps=5",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    "-y",
+    outputPath
+  );
+
+  await runCommand("ffmpeg", ffmpegArgs, { timeout: 30000 });
+};
+
+const enqueueLiveMonitoringAnalysis = async (source) => {
+  ensureAnalysisDirectories();
+  const config = getModuleConfig("no-helmet");
+  if (!config) {
+    throw new Error("No Helmet config is unavailable.");
+  }
+
+  const clipPath = buildMonitoringClipPath(source);
+  await captureMonitoringClip(source, clipPath);
+
+  const payload = {
+    mediaSourceId: source.id,
+    videoPath: clipPath,
+    modelPath: config.modelPath,
+    roiConfigPath: config.roiConfigPath || undefined,
+    roiId: config.roiId || undefined,
+    confidenceThreshold: Number(config.confidenceThreshold),
+    iouThreshold: Number(config.iouThreshold),
+    topRatio: Number(config.topRatio),
+    helmetOverlapThreshold: Number(config.helmetOverlapThreshold),
+    violationOnFrames: Number(config.violationOnFrames),
+    cleanOffFrames: Number(config.cleanOffFrames),
+    frameStep: Number(config.frameStep),
+    imageSize: Number(config.imageSize),
+    personLabels: splitCommaSeparated(config.personLabels),
+    helmetLabels: splitCommaSeparated(config.helmetLabels),
+    violationLabels: splitCommaSeparated(config.violationLabels),
+  };
+
+  const job = enqueueAnalysisJob(buildNoHelmetAnalysisJob(payload));
+  const runtimeState = monitoringRuntime.get(source.id) || {};
+  monitoringRuntime.set(source.id, {
+    ...runtimeState,
+    lastQueuedAt: new Date().toISOString(),
+    lastJobId: job.id,
+    status: "queued",
+    error: null,
+  });
+  return job;
+};
+
+const refreshMonitoringRuntime = () => {
+  const sources = readMediaRegistry().filter(
+    (item) =>
+      item.type === "camera" &&
+      item.status === "active" &&
+      item.monitoringStatus === "running" &&
+      item.analytics.includes("PPE")
+  );
+
+  const now = Date.now();
+  const eligibleSourceIds = new Set(sources.map((item) => item.id));
+
+  for (const [sourceId] of monitoringRuntime.entries()) {
+    if (!eligibleSourceIds.has(sourceId)) {
+      monitoringRuntime.delete(sourceId);
+    }
+  }
+
+  sources.forEach((source) => {
+    const intervalSeconds = getMonitoringIntervalSeconds(source);
+    const state = monitoringRuntime.get(source.id) || {};
+    const lastQueuedAt = state.lastQueuedAt ? new Date(state.lastQueuedAt).getTime() : 0;
+    const elapsedMs = now - lastQueuedAt;
+    const due = !lastQueuedAt || elapsedMs >= intervalSeconds * 1000;
+
+    if (!due || hasPendingMonitoringJob(source.id)) {
+      return;
+    }
+
+    enqueueLiveMonitoringAnalysis(source).catch((error) => {
+      monitoringRuntime.set(source.id, {
+        ...state,
+        lastQueuedAt: new Date().toISOString(),
+        status: "failed",
+        error: error instanceof Error ? error.message : "Monitoring analysis failed.",
+      });
+      console.error(
+        `[live-monitoring] Failed to enqueue analysis for ${source.name}:`,
+        error?.stderr || error?.message || error
+      );
+    });
+  });
+
+  for (const [sourceId, state] of monitoringRuntime.entries()) {
+    if (!state.lastJobId) {
+      continue;
+    }
+    const job = analysisJobs.get(state.lastJobId);
+    if (!job) {
+      continue;
+    }
+    monitoringRuntime.set(sourceId, {
+      ...state,
+      status: job.status,
+      error: job.status === "failed" ? job.message || job.stderr || "Analysis failed" : null,
+      lastCompletedAt: job.completedAt || state.lastCompletedAt || null,
+    });
+  }
 };
 
 app.post(
@@ -1425,15 +2484,42 @@ app.delete("/media-sources/:id", (req, res) => {
 
 app.get("/dashboard-summary", (_req, res) => {
   const mediaSources = readMediaRegistry();
-  const analysisHistory = readAnalysisHistory();
-  const noHelmetHistory = analysisHistory.filter((item) => item.analysisType === "no_helmet");
+  const ppeHistory = getPpeAnalysisHistory();
 
   const sourceSummaries = mediaSources.map((source) => {
-    const runs = noHelmetHistory.filter((run) => run.videoPath === source.source);
+    const runs = getRunsForSource(ppeHistory, source);
     const latestRun = runs[0] || null;
-    const latestRunSummary = latestRun ? readRunSummary(_req, latestRun.outputDir) : null;
+    const latestDetectionRun = getLatestDetectionRun(runs);
+    const latestRunSummary = latestRun
+      ? readRunSummary(_req, latestRun.outputDir, {
+          analysisType: latestRun.analysisType,
+          runId: latestRun.id,
+          outputDir: latestRun.outputDir,
+          createdAt: latestRun.createdAt,
+          sourceId: source.id,
+          sourceName: source.name,
+          sourceLocation: source.location,
+          sourceType: source.type,
+        })
+      : null;
+    const latestDetectionSummary = latestDetectionRun
+      ? readRunSummary(_req, latestDetectionRun.outputDir, {
+          analysisType: latestDetectionRun.analysisType,
+          runId: latestDetectionRun.id,
+          outputDir: latestDetectionRun.outputDir,
+          createdAt: latestDetectionRun.createdAt,
+          sourceId: source.id,
+          sourceName: source.name,
+          sourceLocation: source.location,
+          sourceType: source.type,
+        })
+      : null;
     const latestSnapshotUrl =
-      latestRunSummary?.events?.find((event) => event.snapshotUrl)?.snapshotUrl || null;
+      latestDetectionSummary?.events?.find((event) => event.snapshotUrl)?.snapshotUrl ||
+      latestRunSummary?.events?.find((event) => event.snapshotUrl)?.snapshotUrl ||
+      null;
+    const latestDetectionAt = latestDetectionRun?.createdAt || null;
+    const activeAlert = Boolean(latestDetectionRun && isRecentAlert(latestDetectionAt));
     return {
       mediaSourceId: source.id,
       name: source.name,
@@ -1448,15 +2534,23 @@ app.get("/dashboard-summary", (_req, res) => {
       totalEvents: runs.reduce((sum, run) => sum + Number(run.eventCount || 0), 0),
       totalViolators: runs.reduce((sum, run) => sum + Number(run.violatorCount || 0), 0),
       latestRunAt: latestRun?.createdAt || null,
-      latestEventCount: latestRun?.eventCount ?? 0,
-      latestViolatorCount: latestRun?.violatorCount ?? 0,
+      latestDetectionAt,
+      latestEventCount: latestDetectionRun?.eventCount ?? 0,
+      latestViolatorCount: latestDetectionRun?.violatorCount ?? 0,
       latestOutputDir: latestRun?.outputDir || null,
       latestSnapshotUrl,
+      latestAnalysisType: latestDetectionRun?.analysisType || latestRun?.analysisType || null,
+      hasActiveAlert: activeAlert,
     };
   });
 
   const analyzedSourceCount = sourceSummaries.filter((item) => item.runCount > 0).length;
-  const latestRun = noHelmetHistory[0] || null;
+  const latestRun = ppeHistory[0] || null;
+  const recentRuns = mediaSources
+    .map((source) => getLatestDetectionRun(getRunsForSource(ppeHistory, source)))
+    .filter(Boolean)
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 10);
 
   res.json({
     ok: true,
@@ -1467,14 +2561,14 @@ app.get("/dashboard-summary", (_req, res) => {
       cameraSources: mediaSources.filter((item) => item.type === "camera").length,
       monitoringSources: mediaSources.filter((item) => item.monitoringStatus === "running").length,
       analyzedSourceCount,
-      totalNoHelmetRuns: noHelmetHistory.length,
-      totalNoHelmetEvents: noHelmetHistory.reduce((sum, run) => sum + Number(run.eventCount || 0), 0),
-      totalViolatorTracks: noHelmetHistory.reduce((sum, run) => sum + Number(run.violatorCount || 0), 0),
+      totalNoHelmetRuns: ppeHistory.length,
+      totalNoHelmetEvents: ppeHistory.reduce((sum, run) => sum + Number(run.eventCount || 0), 0),
+      totalViolatorTracks: ppeHistory.reduce((sum, run) => sum + Number(run.violatorCount || 0), 0),
       latestRunAt: latestRun?.createdAt || null,
       latestRunSourceName: latestRun?.sourceName || path.basename(latestRun?.videoPath || "") || null,
       latestAnalysisSummary: buildLatestAnalysisSummary(_req, latestRun),
       sourceSummaries,
-      recentRuns: noHelmetHistory.slice(0, 10),
+      recentRuns,
     },
   });
 });
@@ -1486,12 +2580,16 @@ app.get("/dashboard-summary/source/:id/latest-analysis", (req, res) => {
     return res.status(404).json({ ok: false, message: "Media source not found." });
   }
 
-  const analysisHistory = readAnalysisHistory();
-  const noHelmetHistory = analysisHistory.filter((item) => item.analysisType === "no_helmet");
-  const latestRun =
-    noHelmetHistory.find((run) => run.mediaSourceId === source.id) ||
-    noHelmetHistory.find((run) => run.videoPath === source.source) ||
-    null;
+  const ppeHistory = getPpeAnalysisHistory();
+  const sourceRuns = getRunsForSource(ppeHistory, source);
+  const latestRun = sourceRuns[0] || null;
+  const latestDetectionRun = getLatestDetectionRun(sourceRuns);
+  const noHelmetRuns = sourceRuns.filter((run) => run.analysisType === "no_helmet");
+  const noSafetyVestRuns = sourceRuns.filter((run) => run.analysisType === "no_safety_vest");
+  const latestNoHelmetRun = noHelmetRuns[0] || null;
+  const latestNoSafetyVestRun = noSafetyVestRuns[0] || null;
+  const latestNoHelmetDetectionRun = getLatestDetectionRun(noHelmetRuns);
+  const latestNoSafetyVestDetectionRun = getLatestDetectionRun(noSafetyVestRuns);
 
   return res.json({
     ok: true,
@@ -1507,27 +2605,389 @@ app.get("/dashboard-summary/source/:id/latest-analysis", (req, res) => {
       monitoringIntervalSeconds: source.monitoringIntervalSeconds,
     },
     latestAnalysisSummary: buildLatestAnalysisSummary(req, latestRun),
+    latestDetectionSummary: buildLatestAnalysisSummary(req, latestDetectionRun),
+    latestPpeByModule: {
+      noHelmet: buildLatestAnalysisSummary(req, latestNoHelmetRun),
+      noSafetyVest: buildLatestAnalysisSummary(req, latestNoSafetyVestRun),
+    },
+    latestDetectionByModule: {
+      noHelmet: buildLatestAnalysisSummary(req, latestNoHelmetDetectionRun),
+      noSafetyVest: buildLatestAnalysisSummary(req, latestNoSafetyVestDetectionRun),
+    },
   });
 });
 
 app.get("/analysis/no-helmet/defaults", (_req, res) => {
+  const resolved = resolveModuleConfigEnvelope("no-helmet");
   res.json({
     ok: true,
-    defaultModelPath,
+    defaultModelPath: resolved?.ok ? resolved.resolvedModelPath : defaultModelPath,
     defaultRoiConfigPath,
     analysisOutputRoot,
     serverPort: Number(PORT),
     uploadRoot,
+    activeModel: resolved?.ok ? resolved.activeModel : null,
+    modelSource: resolved?.ok && resolved.usesDeploymentGate ? "deployment-gate" : "manual",
+  });
+});
+
+app.get("/analysis/no-safety-vest/defaults", (_req, res) => {
+  const resolved = resolveModuleConfigEnvelope("no-safety-vest");
+  res.json({
+    ok: true,
+    defaultModelPath: resolved?.ok ? resolved.resolvedModelPath : defaultModelPath,
+    defaultRoiConfigPath,
+    analysisOutputRoot,
+    serverPort: Number(PORT),
+    uploadRoot,
+    activeModel: resolved?.ok ? resolved.activeModel : null,
+    modelSource: resolved?.ok && resolved.usesDeploymentGate ? "deployment-gate" : "manual",
   });
 });
 
 app.get("/analysis/hse-safety-rules/defaults", (_req, res) => {
-  const config = getModuleConfig("safety-rules");
+  const resolved = resolveModuleConfigEnvelope("safety-rules");
   return res.json({
     ok: true,
     moduleKey: "safety-rules",
     analysisOutputRoot,
-    config,
+    config: resolved?.ok ? resolved.config : getModuleConfig("safety-rules"),
+    activeModel: resolved?.ok ? resolved.activeModel : null,
+    modelSource: resolved?.ok && resolved.usesDeploymentGate ? "deployment-gate" : "manual",
+  });
+});
+
+app.get("/models/overview", (_req, res) => {
+  return res.json({
+    ok: true,
+    overview: buildModelsOverview(),
+  });
+});
+
+app.get("/models/datasets", (_req, res) => {
+  return res.json({
+    ok: true,
+    items: readModelDatasets().sort(
+      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+    ),
+  });
+});
+
+app.post("/models/datasets", (req, res) => {
+  const parsed = createModelDatasetPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid model dataset payload.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const now = new Date().toISOString();
+  const item = {
+    id: `dataset-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    ...parsed.data,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const items = readModelDatasets();
+  items.unshift(item);
+  writeModelDatasets(items);
+
+  return res.status(201).json({
+    ok: true,
+    item,
+    overview: buildModelsOverview(),
+  });
+});
+
+app.patch("/models/datasets/:id", (req, res) => {
+  const parsed = updateModelDatasetPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid model dataset update payload.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const items = readModelDatasets();
+  const index = items.findIndex((item) => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, message: "Model dataset not found." });
+  }
+
+  const updated = {
+    ...items[index],
+    ...parsed.data,
+    updatedAt: new Date().toISOString(),
+  };
+  items[index] = updated;
+  writeModelDatasets(items);
+
+  return res.json({
+    ok: true,
+    item: updated,
+    overview: buildModelsOverview(),
+  });
+});
+
+app.get("/models/training-jobs", (_req, res) => {
+  return res.json({
+    ok: true,
+    items: readModelTrainingJobs().sort(
+      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+    ),
+  });
+});
+
+app.get("/models/versions", (_req, res) => {
+  return res.json({
+    ok: true,
+    items: readModelVersions().sort(
+      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+    ),
+  });
+});
+
+app.patch("/models/versions/:id", (req, res) => {
+  const parsed = updateModelVersionPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid model version update payload.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const items = readModelVersions();
+  const index = items.findIndex((item) => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, message: "Model version not found." });
+  }
+
+  const target = items[index];
+  const now = new Date().toISOString();
+
+  if (parsed.data.status === "active") {
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+      const item = items[itemIndex];
+      if (item.moduleKey === target.moduleKey && item.status === "active" && item.id !== target.id) {
+        items[itemIndex] = {
+          ...item,
+          status: "approved",
+          updatedAt: now,
+        };
+      }
+    }
+  }
+
+  const updated = {
+    ...target,
+    status: parsed.data.status,
+    updatedAt: now,
+  };
+  items[index] = updated;
+  writeModelVersions(items);
+
+  return res.json({
+    ok: true,
+    item: updated,
+    overview: buildModelsOverview(),
+  });
+});
+
+app.post("/models/training-jobs", (req, res) => {
+  const parsed = createModelTrainingJobPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid training job payload.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const datasets = readModelDatasets();
+  const dataset = datasets.find((item) => item.id === parsed.data.datasetId);
+  if (!dataset) {
+    return res.status(404).json({ ok: false, message: "Model dataset not found." });
+  }
+  if (dataset.status !== "ready") {
+    return res.status(400).json({ ok: false, message: "Only datasets with status 'ready' can start training jobs." });
+  }
+
+  const candidateJob = {
+    targetModule: parsed.data.targetModule,
+    domain: dataset.domain,
+  };
+
+  if (!isTrainingJobCompatibleWithDataset(candidateJob, dataset)) {
+    return res.status(400).json({
+      ok: false,
+      message: "Dataset domain and target module are not compatible.",
+    });
+  }
+
+  const now = new Date().toISOString();
+  const item = {
+    id: `train-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    datasetId: dataset.id,
+    datasetName: dataset.name,
+    domain: dataset.domain,
+    targetModule: parsed.data.targetModule,
+    baseModelPath: parsed.data.baseModelPath,
+    outputModelPath: null,
+    labels: dataset.labels,
+    status: "queued",
+    epochs: parsed.data.epochs,
+    imageSize: parsed.data.imageSize,
+    notes: parsed.data.notes,
+    metrics: {},
+    createdAt: now,
+    startedAt: null,
+    endedAt: null,
+    updatedAt: now,
+  };
+
+  const items = readModelTrainingJobs();
+  items.unshift(item);
+  writeModelTrainingJobs(items);
+
+  return res.status(201).json({
+    ok: true,
+    item,
+    overview: buildModelsOverview(),
+  });
+});
+
+app.patch("/models/training-jobs/:id", (req, res) => {
+  const parsed = updateModelTrainingJobPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid training job update payload.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const items = readModelTrainingJobs();
+  const index = items.findIndex((item) => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, message: "Training job not found." });
+  }
+
+  const current = items[index];
+  const nextStatus = parsed.data.status || current.status;
+  const now = new Date().toISOString();
+  const updated = {
+    ...current,
+    ...parsed.data,
+    status: nextStatus,
+    startedAt:
+      nextStatus === "running"
+        ? current.startedAt || now
+        : nextStatus === "queued"
+          ? null
+          : current.startedAt,
+    endedAt:
+      nextStatus === "completed" || nextStatus === "failed"
+        ? now
+        : nextStatus === "running" || nextStatus === "queued"
+          ? null
+          : current.endedAt,
+    updatedAt: now,
+  };
+
+  items[index] = updated;
+  writeModelTrainingJobs(items);
+  syncModelVersionForTrainingJob(updated);
+
+  return res.json({
+    ok: true,
+    item: updated,
+    overview: buildModelsOverview(),
+  });
+});
+
+app.get("/models/evaluations", (_req, res) => {
+  return res.json({
+    ok: true,
+    items: readModelEvaluations().sort(
+      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+    ),
+  });
+});
+
+app.post("/models/evaluations", (req, res) => {
+  const parsed = createModelEvaluationPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid model evaluation payload.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const modelVersions = readModelVersions();
+  const modelVersion = modelVersions.find((item) => item.id === parsed.data.modelVersionId);
+  if (!modelVersion) {
+    return res.status(404).json({ ok: false, message: "Model version not found." });
+  }
+
+  const now = new Date().toISOString();
+  const item = {
+    id: `evaluation-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    modelVersionId: modelVersion.id,
+    modelName: modelVersion.name,
+    moduleKey: modelVersion.moduleKey,
+    domain: modelVersion.domain,
+    ...parsed.data,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const items = readModelEvaluations();
+  items.unshift(item);
+  writeModelEvaluations(items);
+  syncModelVersionForEvaluation(item);
+
+  return res.status(201).json({
+    ok: true,
+    item,
+    overview: buildModelsOverview(),
+  });
+});
+
+app.patch("/models/evaluations/:id", (req, res) => {
+  const parsed = updateModelEvaluationPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid model evaluation update payload.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const items = readModelEvaluations();
+  const index = items.findIndex((item) => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, message: "Model evaluation not found." });
+  }
+
+  const updated = {
+    ...items[index],
+    ...parsed.data,
+    updatedAt: new Date().toISOString(),
+  };
+  items[index] = updated;
+  writeModelEvaluations(items);
+  syncModelVersionForEvaluation(updated);
+
+  return res.json({
+    ok: true,
+    item: updated,
+    overview: buildModelsOverview(),
   });
 });
 
@@ -1581,14 +3041,19 @@ app.post("/analysis/hse-safety-rules", (req, res) => {
 
   const runId = `hse-run-${Date.now()}`;
   const outputDir = path.join(analysisOutputRoot, runId);
+  const createdAt = new Date().toISOString();
   fs.mkdirSync(outputDir, { recursive: true });
 
-  const report = buildHseSafetyRulesReport(req, source, config);
+  const report = buildHseSafetyRulesReport(req, source, config, {
+    runId,
+    outputDir,
+    createdAt,
+  });
   const reportPayload = {
     id: runId,
     analysisType: "hse_safety_rules",
     outputDir,
-    createdAt: new Date().toISOString(),
+    createdAt,
     ...report,
   };
 
@@ -1655,27 +3120,67 @@ app.get("/analysis/no-helmet/jobs/:id", (req, res) => {
   return res.json(sanitizeAnalysisJobForResponse(req, job));
 });
 
+app.post("/analysis/no-safety-vest", async (req, res) => {
+  try {
+    const parsed = noSafetyVestPayloadSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid analysis payload",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const job = enqueueAnalysisJob(buildNoSafetyVestAnalysisJob(parsed.data));
+    return res.status(202).json({
+      ok: true,
+      jobId: job.id,
+      status: job.status,
+      message: job.message,
+      runId: job.runId,
+      outputDir: job.outputDir,
+      createdAt: job.createdAt,
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || 500).json({
+      ok: false,
+      message: error?.message || "Analysis failed",
+      stdout: error?.stdout || "",
+      stderr: error?.stderr || "",
+    });
+  }
+});
+
+app.get("/analysis/no-safety-vest/jobs/:id", (req, res) => {
+  const job = analysisJobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({ ok: false, message: "Analysis job not found." });
+  }
+
+  return res.json(sanitizeAnalysisJobForResponse(req, job));
+});
+
 app.get("/module-configs/:moduleKey", (req, res) => {
-  const schema = moduleConfigSchemas[req.params.moduleKey];
-  if (!schema) {
+  if (!moduleConfigSchemas[req.params.moduleKey]) {
     return res.status(404).json({ ok: false, message: "Module config not found." });
   }
 
-  const items = readModuleConfigs();
-  const config = items[req.params.moduleKey] || defaultModuleConfigs[req.params.moduleKey];
-  const parsed = schema.safeParse(config);
-  if (!parsed.success) {
+  const resolved = resolveModuleConfigEnvelope(req.params.moduleKey);
+  if (!resolved?.ok) {
     return res.status(500).json({
       ok: false,
       message: "Stored module config is invalid.",
-      errors: parsed.error.flatten(),
+      errors: resolved?.error || {},
     });
   }
 
   return res.json({
     ok: true,
     moduleKey: req.params.moduleKey,
-    config: parsed.data,
+    config: resolved.config,
+    resolvedModelPath: resolved.resolvedModelPath,
+    activeModel: resolved.activeModel,
+    modelSource: resolved.usesDeploymentGate ? "deployment-gate" : "manual",
   });
 });
 
@@ -1801,4 +3306,6 @@ app.post("/sync", async (req, res) => {
 
 app.listen(Number(PORT), () => {
   console.log(`Local analysis server running on port ${PORT}`);
+  refreshMonitoringRuntime();
+  setInterval(refreshMonitoringRuntime, LIVE_MONITORING_POLL_INTERVAL_MS);
 });

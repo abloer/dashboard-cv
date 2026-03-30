@@ -1,4 +1,5 @@
 import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import type { AnalysisFinding } from "@/lib/analysisFindings";
 import type {
   MediaExecutionMode,
   MediaMonitoringStatus,
@@ -20,15 +21,18 @@ export interface DashboardSourceSummary {
   totalEvents: number;
   totalViolators: number;
   latestRunAt: string | null;
+  latestDetectionAt: string | null;
   latestEventCount: number;
   latestViolatorCount: number;
   latestOutputDir: string | null;
   latestSnapshotUrl: string | null;
+  latestAnalysisType: "no_helmet" | "no_safety_vest" | null;
+  hasActiveAlert: boolean;
 }
 
 export interface DashboardRecentRun {
   id: string;
-  analysisType: "no_helmet";
+  analysisType: "no_helmet" | "no_safety_vest";
   mediaSourceId: string | null;
   sourceName: string;
   location: string | null;
@@ -43,7 +47,7 @@ export interface DashboardRecentRun {
 
 export interface DashboardLatestAnalysisSummary {
   id: string;
-  analysisType: "no_helmet";
+  analysisType: "no_helmet" | "no_safety_vest";
   mediaSourceId: string | null;
   sourceName: string;
   location: string | null;
@@ -61,6 +65,7 @@ export interface DashboardLatestAnalysisSummary {
   lastEventSeconds: number | null;
   totalViolationDurationSeconds: number;
   narrative: string;
+  analysisFindings?: AnalysisFinding[];
   events: Array<{
     event_id: string;
     start_time_seconds: number;
@@ -70,6 +75,8 @@ export interface DashboardLatestAnalysisSummary {
     roi_id: string;
     snapshot_path: string;
     snapshotUrl?: string | null;
+    status?: string;
+    detection_mode?: string;
   }>;
 }
 
@@ -109,6 +116,15 @@ interface DashboardSourceLatestSummaryResponse {
     monitoringIntervalSeconds: number | null;
   };
   latestAnalysisSummary: DashboardLatestAnalysisSummary | null;
+  latestDetectionSummary: DashboardLatestAnalysisSummary | null;
+  latestPpeByModule: {
+    noHelmet: DashboardLatestAnalysisSummary | null;
+    noSafetyVest: DashboardLatestAnalysisSummary | null;
+  };
+  latestDetectionByModule: {
+    noHelmet: DashboardLatestAnalysisSummary | null;
+    noSafetyVest: DashboardLatestAnalysisSummary | null;
+  };
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {

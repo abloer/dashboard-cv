@@ -143,7 +143,7 @@ export default function LiveMonitoring() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { data: mediaItems = [] } = useMediaRegistry();
-  const { data: dashboardSummary } = useDashboardSummary();
+  const { data: dashboardSummary } = useDashboardSummary({ refetchInterval: 15000 });
   const updateMonitoringMutation = useUpdateMediaSourceMonitoring();
   const [hoveredSourceId, setHoveredSourceId] = useState<string | null>(null);
 
@@ -172,9 +172,9 @@ export default function LiveMonitoring() {
         summary,
         latestEventCount,
         latestViolatorCount,
-        hasAlert: latestEventCount > 0,
+        hasAlert: Boolean(summary?.hasActiveAlert),
         severity: getAlertSeverity(latestEventCount, latestViolatorCount),
-        lastDetectionAt: latestEventCount > 0 ? summary?.latestRunAt || null : null,
+        lastDetectionAt: summary?.latestDetectionAt || null,
       };
       })
       .sort((left, right) => {
@@ -195,15 +195,30 @@ export default function LiveMonitoring() {
       });
   }, [cameraSources, dashboardSummary?.sourceSummaries]);
 
-  const allCameraRuns = useMemo(() => {
-    const cameraIds = new Set(cameraSources.map((item) => item.id));
-    return (dashboardSummary?.recentRuns || []).filter(
-      (run) => run.mediaSourceId && cameraIds.has(run.mediaSourceId)
-    );
-  }, [cameraSources, dashboardSummary?.recentRuns]);
+  const alertRows = useMemo(
+    () =>
+      cameraTiles
+        .filter((tile) => tile.latestEventCount > 0 || (tile.summary?.totalEvents || 0) > 0)
+        .sort((left, right) => {
+          const leftTimestamp = left.lastDetectionAt || left.summary?.latestRunAt || "";
+          const rightTimestamp = right.lastDetectionAt || right.summary?.latestRunAt || "";
+          return new Date(rightTimestamp).getTime() - new Date(leftTimestamp).getTime();
+        }),
+    [cameraTiles]
+  );
 
-  const { data: latestSummaryResponse } = useSourceLatestAnalysisSummary(selectedSource?.id || null);
-  const latestSummary = latestSummaryResponse?.latestAnalysisSummary || null;
+  const { data: latestSummaryResponse } = useSourceLatestAnalysisSummary(selectedSource?.id || null, {
+    refetchInterval: selectedSource?.monitoringStatus === "running" ? 15000 : false,
+  });
+  const latestSummary =
+    latestSummaryResponse?.latestDetectionSummary ||
+    latestSummaryResponse?.latestAnalysisSummary ||
+    null;
+  const latestRunSummary = latestSummaryResponse?.latestAnalysisSummary || null;
+  const selectedSourceTile = useMemo(
+    () => cameraTiles.find((tile) => tile.source.id === selectedSource?.id) || null,
+    [cameraTiles, selectedSource?.id]
+  );
   const selectedSourceYoutubeEmbedUrl = selectedSource
     ? getYouTubeEmbedUrl(selectedSource.source)
     : null;
@@ -532,14 +547,14 @@ export default function LiveMonitoring() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {allCameraRuns.length === 0 ? (
+              {alertRows.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border bg-secondary/20 p-5 text-sm text-muted-foreground">
-                  Belum ada event atau run analysis dari camera source yang tercatat.
+                  Belum ada alert atau hasil PPE yang tercatat dari camera source.
                 </div>
               ) : (
-                allCameraRuns.slice(0, 8).map((run) => (
+                alertRows.slice(0, 8).map((tile) => (
                   <div
-                    key={run.id}
+                    key={tile.source.id}
                     className="rounded-xl border border-border/70 bg-secondary/10 p-4"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -547,21 +562,31 @@ export default function LiveMonitoring() {
                         <button
                           type="button"
                           onClick={() =>
-                            navigate(`/live-monitoring?sourceId=${encodeURIComponent(run.mediaSourceId as string)}`)
+                            navigate(`/live-monitoring?sourceId=${encodeURIComponent(tile.source.id)}`)
                           }
                           className="text-left font-medium text-foreground hover:text-primary"
                         >
-                          {run.sourceName}
+                          {tile.source.name}
                         </button>
                         <p className="text-xs text-muted-foreground">
-                          {run.location || "Lokasi tidak tersedia"}
+                          {tile.source.location || "Lokasi tidak tersedia"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {tile.lastDetectionAt
+                            ? `Deteksi terakhir ${formatDateTime(tile.lastDetectionAt)}`
+                            : tile.summary?.latestRunAt
+                              ? `Run terakhir ${formatDateTime(tile.summary.latestRunAt)}`
+                              : "Belum ada timestamp deteksi"}
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={run.eventCount > 0 ? "destructive" : "outline"}>
-                          {run.eventCount > 0 ? `${run.eventCount} event` : "No event"}
+                        <Badge variant={tile.hasAlert ? "destructive" : "outline"}>
+                          {tile.latestEventCount > 0 ? `${tile.latestEventCount} event` : "No active event"}
                         </Badge>
-                        <Badge variant="outline">{run.violatorCount} violator</Badge>
+                        <Badge variant="outline">{tile.latestViolatorCount} violator</Badge>
+                        <Badge variant="outline">
+                          Total {tile.summary?.totalEvents || 0} event
+                        </Badge>
                       </div>
                     </div>
                   </div>
@@ -681,8 +706,10 @@ export default function LiveMonitoring() {
                   <div className="space-y-2">
                     <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Last Detection</p>
                     <p className="text-sm text-foreground">
-                      {latestSummary?.eventWindowStart
+                      {latestSummary?.createdAt
                         ? formatDateTime(latestSummary.createdAt)
+                        : latestRunSummary?.createdAt
+                          ? formatDateTime(latestRunSummary.createdAt)
                         : "--"}
                     </p>
                   </div>
@@ -712,14 +739,14 @@ export default function LiveMonitoring() {
             />
             <MetricCard
               title="Latest Events"
-              value={latestSummary?.eventCount ?? 0}
+              value={latestSummary?.eventCount ?? latestRunSummary?.eventCount ?? 0}
               subtitle="Hasil run terbaru untuk source ini"
               icon={ShieldAlert}
               variant="warning"
             />
             <MetricCard
               title="Violator Tracks"
-              value={latestSummary?.violatorCount ?? 0}
+              value={latestSummary?.violatorCount ?? latestRunSummary?.violatorCount ?? 0}
               subtitle="Track pelanggar pada hasil terbaru"
               icon={Camera}
               variant="accent"
@@ -834,7 +861,7 @@ export default function LiveMonitoring() {
                     >
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={latestSummary.eventCount > 0 ? "destructive" : "outline"}>
-                          {latestSummary.eventCount > 0 ? "Alert Active" : "Normal"}
+                          {selectedSourceTile?.hasAlert ? "Alert Active" : "Latest Detection"}
                         </Badge>
                         <Badge variant="outline">{latestSummary.eventCount} event</Badge>
                         <Badge variant="outline">{latestSummary.violatorCount} violator</Badge>

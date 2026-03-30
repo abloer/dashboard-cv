@@ -1,4 +1,5 @@
 export interface SafetyRulesModuleConfig {
+  modelSource: "deployment-gate" | "manual";
   ruleProfileName: string;
   modelPath: string;
   detectorLabels: string;
@@ -18,6 +19,7 @@ export interface SafetyRulesModuleConfig {
 const STORAGE_KEY = "dashboard-cv-ut:safety-rules-config";
 
 export const DEFAULT_SAFETY_RULES_CONFIG: SafetyRulesModuleConfig = {
+  modelSource: "deployment-gate",
   ruleProfileName: "General Site Safety",
   modelPath: "/app/models/detect-construction-safety-best.pt",
   detectorLabels: "person, vehicle, hardhat, safety-vest",

@@ -1,3 +1,5 @@
+import type { AnalysisFinding } from "@/lib/analysisFindings";
+
 export interface NoHelmetAnalysisEvent {
   event_id: string;
   video_path: string;
@@ -64,6 +66,7 @@ export interface NoHelmetAnalysisSummary {
   event_count: number;
   global_summary?: NoHelmetGlobalSummary;
   events: NoHelmetAnalysisEvent[];
+  analysisFindings?: AnalysisFinding[];
 }
 
 export interface RunNoHelmetAnalysisPayload {

@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, RotateCcw, Save, ShieldCheck } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Header } from "@/components/layout/Header";
-import { useMediaRegistry } from "@/hooks/useMediaRegistry";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,19 +14,18 @@ import {
   resetSafetyRulesConfig,
   writeSafetyRulesConfig,
 } from "@/lib/safetyRulesConfig";
-import { getModuleConfig, updateModuleConfig } from "@/lib/moduleConfigs";
+import {
+  getModuleConfigEnvelope,
+  updateModuleConfig,
+  type ModuleConfigActiveModel,
+} from "@/lib/moduleConfigs";
 
 export default function SafetyRulesSetup() {
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const { data: mediaItems = [] } = useMediaRegistry();
   const [config, setConfig] = useState<SafetyRulesModuleConfig>(() => readSafetyRulesConfig());
+  const [activeModel, setActiveModel] = useState<ModuleConfigActiveModel | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const selectedSourceId = searchParams.get("sourceId");
-  const selectedSource = mediaItems.find((item) => item.id === selectedSourceId) || null;
-  const isCameraSource = selectedSource?.type === "camera";
   const readiness = useMemo(
     () => [
       {
@@ -46,26 +43,20 @@ export default function SafetyRulesSetup() {
         ready: config.requiredPpe.trim().length > 0,
         detail: config.requiredPpe.trim() || "Checklist PPE belum diisi.",
       },
-      {
-        label: "Konteks Source",
-        ready: Boolean(selectedSource),
-        detail: selectedSource
-          ? `${selectedSource.name} • ${selectedSource.executionMode === "manual" ? "Manual" : selectedSource.executionMode}`
-          : "Buka dari Media Sources untuk mengikat rule ke source tertentu.",
-      },
     ],
-    [config.modelPath, config.requiredPpe, config.restrictedZones, selectedSource]
+    [config.modelPath, config.requiredPpe, config.restrictedZones]
   );
   const readyCount = readiness.filter((item) => item.ready).length;
 
   useEffect(() => {
     let ignore = false;
     setIsSyncing(true);
-    getModuleConfig<SafetyRulesModuleConfig>("safety-rules")
-      .then((serverConfig) => {
+    getModuleConfigEnvelope<SafetyRulesModuleConfig>("safety-rules")
+      .then((payload) => {
         if (ignore) return;
-        setConfig(serverConfig);
-        writeSafetyRulesConfig(serverConfig);
+        setConfig(payload.config);
+        setActiveModel(payload.activeModel);
+        writeSafetyRulesConfig(payload.config);
       })
       .catch(() => {
         if (ignore) return;
@@ -143,53 +134,38 @@ export default function SafetyRulesSetup() {
         subtitle="Workspace konfigurasi awal untuk aturan keselamatan umum, restricted zone, dan baseline compliance."
       />
 
-      {selectedSource ? (
-        <Card className="mb-6 border-cyan-500/20 bg-cyan-500/5">
-          <CardContent className="grid gap-4 p-5 md:grid-cols-[1.5fr,1fr,1fr]">
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Source Konteks</p>
-              <p className="text-lg font-semibold text-foreground">{selectedSource.name}</p>
-              <p className="text-sm text-muted-foreground">
-                {selectedSource.location} • {selectedSource.type === "upload" ? "Upload Video" : "Camera Stream"}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Kategori Output</p>
-              <div className="flex flex-wrap gap-2">
-                {selectedSource.analytics.map((analytic) => (
-                  <Badge key={analytic} variant="outline" className="border-primary/20">
-                    {analytic}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status Modul</p>
-              <p className="text-sm text-muted-foreground">
-                Workspace HSE sudah aktif untuk menyusun model, rule profile, restricted zone, dan baseline alert.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <div className="grid gap-6 xl:grid-cols-[1.05fr,0.95fr]">
+        <div className="space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Rule Profile</CardTitle>
+            <CardTitle className="text-xl">Detector Setup</CardTitle>
             <CardDescription>
-              Simpan parameter dasar HSE ke server agar source yang masuk kategori `HSE` punya baseline konfigurasi yang konsisten lintas browser dan operator.
+              Preset detector ini menjadi baseline saat assessment atau run HSE dijalankan dari{" "}
+              <code>Media Sources &gt; Run Analysis</code>.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium text-foreground">Rule Profile Name</label>
-                <Input value={config.ruleProfileName} onChange={(event) => handleChange("ruleProfileName", event.target.value)} />
-              </div>
-              <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium text-foreground">Model Path</label>
                 <Input value={config.modelPath} onChange={(event) => handleChange("modelPath", event.target.value)} />
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <Badge variant={config.modelSource === "deployment-gate" ? "default" : "secondary"}>
+                    {config.modelSource === "deployment-gate" ? "Deployment Gate" : "Manual Override"}
+                  </Badge>
+                  {activeModel ? (
+                    <span>
+                      Model aktif: <span className="text-foreground">{activeModel.name}</span>
+                    </span>
+                  ) : (
+                    <span>Belum ada model aktif dari Deployment Gate untuk modul ini.</span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={useDeploymentGateModel} disabled={isSyncing || !activeModel}>
+                    Gunakan Model Aktif
+                  </Button>
+                </div>
                 <p className="text-xs text-muted-foreground">
                   Gunakan model yang bisa mendeteksi person, PPE, atau object pelanggaran yang relevan untuk aturan HSE.
                 </p>
@@ -217,6 +193,23 @@ export default function SafetyRulesSetup() {
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Image Size</label>
                 <Input value={config.imageSize} onChange={(event) => handleChange("imageSize", event.target.value)} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Policy / Rules Engine</CardTitle>
+            <CardDescription>
+              Baseline policy ini menyusun aturan keselamatan yang akan dipakai lintas source HSE sebagai rule profile default.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium text-foreground">Rule Profile Name</label>
+                <Input value={config.ruleProfileName} onChange={(event) => handleChange("ruleProfileName", event.target.value)} />
               </div>
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium text-foreground">Restricted Zones</label>
@@ -256,6 +249,7 @@ export default function SafetyRulesSetup() {
             </div>
           </CardContent>
         </Card>
+        </div>
 
         <div className="space-y-6">
           <Card>
@@ -295,41 +289,59 @@ export default function SafetyRulesSetup() {
               <div className="flex items-start gap-3 rounded-lg border border-border/70 bg-secondary/10 p-4">
                 <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                 <p>
-                  Rule profile membantu menyamakan restricted zone, kebutuhan PPE, detector labels, dan cooldown alert antar source yang diawasi dalam kategori HSE.
+                  Rule profile membantu menyamakan restricted zone, kebutuhan PPE, detector labels, dan cooldown alert sebagai default module HSE untuk semua source yang memakai kategori ini.
                 </p>
               </div>
               <div className="flex items-start gap-3 rounded-lg border border-border/70 bg-secondary/10 p-4">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                 <p>
-                  Modul ini sekarang punya model path dan parameter deteksi, sehingga tim bisa menyiapkan baseline inferensi HSE sebelum rule detail seperti trespass atau unsafe behavior dipecah menjadi engine terpisah.
+                  Menu `Analysis Modules` dipakai khusus untuk setup default module. Proses assessment atau run aktual tetap dibuka dari action `Run Analysis` pada masing-masing row di `Media Sources`.
                 </p>
               </div>
-              <div className="flex flex-wrap gap-3">
-                {selectedSource ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() =>
-                      navigate(
-                        isCameraSource
-                          ? `/live-monitoring?sourceId=${encodeURIComponent(selectedSource.id)}`
-                          : `/analysis-setup?sourceId=${encodeURIComponent(selectedSource.id)}`
-                      )
-                    }
-                  >
-                    {isCameraSource ? "Buka Live Monitoring" : "Kembali ke Analysis Setup"}
-                  </Button>
-                ) : null}
-                {selectedSource ? (
-                  <Button
-                    type="button"
-                    onClick={() =>
-                      navigate(`/hse-safety-rules-run?sourceId=${encodeURIComponent(selectedSource.id)}`)
-                    }
-                  >
-                    Jalankan HSE Assessment
-                  </Button>
-                ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xl">Preset Aktif Saat Ini</CardTitle>
+              <CardDescription>
+                Ringkasan singkat konfigurasi default yang akan diturunkan ke halaman run.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Rule Profile</p>
+                <p className="mt-1 text-sm text-foreground">{config.ruleProfileName}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Detector Baseline</p>
+                <p className="mt-1 break-all text-sm text-foreground">{config.modelPath}</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Labels: {config.detectorLabels} | Violations: {config.violationLabels}
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Threshold</p>
+                  <p className="mt-1 text-sm text-foreground">
+                    Conf {config.confidenceThreshold} • IoU {config.iouThreshold}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Sampling</p>
+                  <p className="mt-1 text-sm text-foreground">
+                    Step {config.frameStep} • Size {config.imageSize}
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Policy Baseline</p>
+                <p className="mt-1 text-sm text-foreground">
+                  Zones: {config.restrictedZones}
+                </p>
+                <p className="mt-2 text-sm text-foreground">
+                  PPE: {config.requiredPpe} | Max People: {config.maxPeopleInZone} | Cooldown: {config.alertCooldownSeconds}s
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -338,3 +350,23 @@ export default function SafetyRulesSetup() {
     </DashboardLayout>
   );
 }
+  const useDeploymentGateModel = () => {
+    if (!activeModel?.modelPath) {
+      toast({
+        title: "Belum ada model aktif",
+        description: "Deployment Gate belum punya model aktif untuk modul HSE • Safety Rules.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setConfig((current) => ({
+      ...current,
+      modelSource: "deployment-gate",
+      modelPath: activeModel.modelPath,
+    }));
+    toast({
+      title: "Model aktif dipakai",
+      description: `Konfigurasi sekarang mengikuti model aktif ${activeModel.name} dari Deployment Gate.`,
+    });
+  };

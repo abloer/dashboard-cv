@@ -23,6 +23,9 @@ class PersonAssessment:
   has_helmet: bool
   helmet_confidence: float | None
   violation_confidence: float
+  assessment_state: str = "violation"
+  positive_ppe_confidence: float | None = None
+  violation_mode: str | None = None
 
 
 @dataclass
@@ -30,6 +33,8 @@ class EventCandidate:
   start_time_seconds: float
   max_confidence: float
   best_frame_index: int
+  status: str = "violation"
+  detection_mode: str = "direct"
 
 
 @dataclass
@@ -43,6 +48,8 @@ class EventRecord:
   track_id: int
   snapshot_path: str
   roi_id: str
+  status: str = "violation"
+  detection_mode: str = "direct"
 
 
 @dataclass
@@ -60,6 +67,8 @@ class Track:
   candidate: EventCandidate | None = None
   active_event: EventCandidate | None = None
   closed_events: list[EventRecord] = field(default_factory=list)
+  positive_ppe_seen: bool = False
+  max_positive_ppe_confidence: float = 0.0
 
 
 @dataclass
@@ -130,6 +139,20 @@ def top_band(person_bbox: BBox, ratio: float) -> BBox:
   return (x1, y1, x2, y1 + (height * ratio))
 
 
+def torso_band(person_bbox: BBox) -> BBox:
+  x1, y1, x2, y2 = person_bbox
+  height = max(0.0, y2 - y1)
+  return (x1, y1 + (height * 0.18), x2, y1 + (height * 0.88))
+
+
+def focus_region(person_bbox: BBox, region: str, top_ratio: float) -> BBox:
+  if region == "torso":
+    return torso_band(person_bbox)
+  if region == "full":
+    return person_bbox
+  return top_band(person_bbox, top_ratio)
+
+
 def person_in_roi(person_bbox: BBox, roi_polygon: Iterable[Point]) -> bool:
   return point_in_polygon(bbox_center(person_bbox), roi_polygon)
 
@@ -146,24 +169,25 @@ def match_helmets_to_people(
   roi_polygon: Iterable[Point],
   top_ratio: float = 0.35,
   overlap_threshold: float = 0.3,
+  match_region: str = "head",
 ) -> list[PersonAssessment]:
   assessments: list[PersonAssessment] = []
 
   for person in people:
     in_roi = person_in_roi(person.bbox, roi_polygon)
     matched_helmet: Detection | None = None
-    person_top = top_band(person.bbox, top_ratio)
+    person_focus_region = focus_region(person.bbox, match_region, top_ratio)
 
     for helmet in helmets:
       center = bbox_center(helmet.bbox)
       if not point_in_polygon(center, [
-        (person_top[0], person_top[1]),
-        (person_top[2], person_top[1]),
-        (person_top[2], person_top[3]),
-        (person_top[0], person_top[3]),
+        (person_focus_region[0], person_focus_region[1]),
+        (person_focus_region[2], person_focus_region[1]),
+        (person_focus_region[2], person_focus_region[3]),
+        (person_focus_region[0], person_focus_region[3]),
       ]):
         continue
-      overlap_ratio = bbox_intersection_ratio(helmet.bbox, person_top)
+      overlap_ratio = bbox_intersection_ratio(helmet.bbox, person_focus_region)
       if overlap_ratio < overlap_threshold:
         continue
       if matched_helmet is None or helmet.confidence > matched_helmet.confidence:
@@ -182,6 +206,9 @@ def match_helmets_to_people(
         has_helmet=has_helmet,
         helmet_confidence=helmet_confidence,
         violation_confidence=violation_confidence,
+        assessment_state="compliant" if has_helmet else "violation",
+        positive_ppe_confidence=helmet_confidence,
+        violation_mode=None if has_helmet else "missing-positive",
       )
     )
   return assessments
@@ -195,6 +222,8 @@ def match_violation_detections_to_people(
   top_ratio: float = 0.35,
   helmet_overlap_threshold: float = 0.15,
   overlap_threshold: float = 0.1,
+  match_region: str = "head",
+  fallback_to_missing_positive: bool = False,
 ) -> list[PersonAssessment]:
   assessments: list[PersonAssessment] = []
 
@@ -215,18 +244,18 @@ def match_violation_detections_to_people(
     in_roi = person_in_roi(person.bbox, roi_polygon)
     matched_violation: Detection | None = None
     matched_helmet: Detection | None = None
-    person_top = top_band(person.bbox, top_ratio)
+    person_focus_region = focus_region(person.bbox, match_region, top_ratio)
 
     for helmet in helmets:
       center = bbox_center(helmet.bbox)
       if not point_in_polygon(center, [
-        (person_top[0], person_top[1]),
-        (person_top[2], person_top[1]),
-        (person_top[2], person_top[3]),
-        (person_top[0], person_top[3]),
+        (person_focus_region[0], person_focus_region[1]),
+        (person_focus_region[2], person_focus_region[1]),
+        (person_focus_region[2], person_focus_region[3]),
+        (person_focus_region[0], person_focus_region[3]),
       ]):
         continue
-      overlap_ratio = bbox_intersection_ratio(helmet.bbox, person_top)
+      overlap_ratio = bbox_intersection_ratio(helmet.bbox, person_focus_region)
       if overlap_ratio < helmet_overlap_threshold:
         continue
       if matched_helmet is None or helmet.confidence > matched_helmet.confidence:
@@ -245,16 +274,39 @@ def match_violation_detections_to_people(
     has_helmet = matched_helmet is not None
     helmet_confidence = matched_helmet.confidence if matched_helmet else None
     violation_confidence = 0.0
+    missing_required_ppe = False
     if matched_violation is not None and not has_helmet:
+      missing_required_ppe = True
       violation_confidence = matched_violation.confidence
+    elif fallback_to_missing_positive and not has_helmet:
+      missing_required_ppe = True
+      violation_confidence = max(
+        0.0,
+        min(1.0, person.confidence - (helmet_confidence or 0.0) * 0.5),
+      )
 
     assessments.append(
       PersonAssessment(
         detection=person,
         in_roi=in_roi,
-        has_helmet=has_helmet or matched_violation is None,
+        has_helmet=not missing_required_ppe,
         helmet_confidence=helmet_confidence,
         violation_confidence=violation_confidence,
+        assessment_state=(
+          "violation"
+          if matched_violation is not None and not has_helmet
+          else "uncertain"
+          if fallback_to_missing_positive and not has_helmet
+          else "compliant"
+        ),
+        positive_ppe_confidence=helmet_confidence,
+        violation_mode=(
+          "direct"
+          if matched_violation is not None and not has_helmet
+          else "fallback"
+          if fallback_to_missing_positive and not has_helmet
+          else None
+        ),
       )
     )
   return assessments
@@ -323,14 +375,18 @@ class ViolationEventManager:
     video_path: str,
     roi_id: str,
     output_dir: Path,
+    event_type: str = "no_helmet",
     violation_on_frames: int = 3,
     clean_off_frames: int = 5,
+    veto_on_positive_evidence: bool = False,
   ) -> None:
     self.video_path = video_path
     self.roi_id = roi_id
     self.output_dir = output_dir
+    self.event_type = event_type
     self.violation_on_frames = violation_on_frames
     self.clean_off_frames = clean_off_frames
+    self.veto_on_positive_evidence = veto_on_positive_evidence
     self._event_counter = 1
 
   def process_updates(self, tracks: dict[int, Track], updates: dict[int, TrackUpdate]) -> list[EventRecord]:
@@ -338,34 +394,67 @@ class ViolationEventManager:
     for track_id, update in updates.items():
       track = tracks[track_id]
       assessment = update.assessment
-      is_violation = bool(assessment and assessment.in_roi and not assessment.has_helmet)
+      if assessment and (assessment.positive_ppe_confidence or 0.0) > 0:
+        track.positive_ppe_seen = True
+        track.max_positive_ppe_confidence = max(
+          track.max_positive_ppe_confidence,
+          float(assessment.positive_ppe_confidence or 0.0),
+        )
 
-      if is_violation and assessment:
-        track.violation_streak += 1
-        track.clean_streak = 0
-        track.last_violation_time_seconds = update.time_seconds
-        if track.violation_streak == 1:
+      assessment_state = (
+        assessment.assessment_state
+        if assessment and assessment.in_roi
+        else "compliant"
+      )
+      if (
+        assessment_state in {"uncertain", "violation"} and
+        self.veto_on_positive_evidence and
+        track.positive_ppe_seen
+      ):
+        assessment_state = "compliant"
+
+      is_non_compliant = assessment_state in {"violation", "uncertain"}
+
+      if is_non_compliant and assessment:
+        target_mode = assessment.violation_mode or "fallback"
+        if track.candidate is None or track.candidate.status != assessment_state:
+          track.violation_streak = 1
           track.candidate = EventCandidate(
             start_time_seconds=update.time_seconds,
             max_confidence=assessment.violation_confidence,
             best_frame_index=update.frame_index,
+            status=assessment_state,
+            detection_mode=target_mode,
           )
-        elif track.candidate is not None and assessment.violation_confidence >= track.candidate.max_confidence:
-          track.candidate.max_confidence = assessment.violation_confidence
-          track.candidate.best_frame_index = update.frame_index
+        else:
+          track.violation_streak += 1
+          if assessment.violation_confidence >= track.candidate.max_confidence:
+            track.candidate.max_confidence = assessment.violation_confidence
+            track.candidate.best_frame_index = update.frame_index
 
+        track.clean_streak = 0
+        track.last_violation_time_seconds = update.time_seconds
         if track.active_event is None and track.violation_streak >= self.violation_on_frames and track.candidate is not None:
           track.active_event = EventCandidate(
             start_time_seconds=track.candidate.start_time_seconds,
             max_confidence=track.candidate.max_confidence,
             best_frame_index=track.candidate.best_frame_index,
+            status=track.candidate.status,
+            detection_mode=track.candidate.detection_mode,
           )
       else:
         track.clean_streak += 1
         track.violation_streak = 0
         track.candidate = None
 
-      if track.active_event is not None and assessment and is_violation and assessment.violation_confidence >= track.active_event.max_confidence:
+      if (
+        track.active_event is not None and
+        assessment and
+        is_non_compliant and
+        track.active_event.status == assessment_state and
+        track.active_event.detection_mode == (assessment.violation_mode or "fallback") and
+        assessment.violation_confidence >= track.active_event.max_confidence
+      ):
         track.active_event.max_confidence = assessment.violation_confidence
         track.active_event.best_frame_index = update.frame_index
 
@@ -391,13 +480,15 @@ class ViolationEventManager:
     record = EventRecord(
       event_id=event_id,
       video_path=self.video_path,
-      event_type="no_helmet",
+      event_type=self.event_type,
       start_time_seconds=track.active_event.start_time_seconds,
       end_time_seconds=end_time,
       max_confidence=track.active_event.max_confidence,
       track_id=track.track_id,
       snapshot_path=snapshot_path,
       roi_id=self.roi_id,
+      status=track.active_event.status,
+      detection_mode=track.active_event.detection_mode,
     )
     track.closed_events.append(record)
     track.active_event = None

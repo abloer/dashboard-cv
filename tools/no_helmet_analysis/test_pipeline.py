@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import json
+import tempfile
 from pathlib import Path
 
 from tools.no_helmet_analysis.core import (
@@ -12,6 +14,7 @@ from tools.no_helmet_analysis.core import (
   match_violation_detections_to_people,
 )
 from tools.no_helmet_analysis.analyze_no_helmet import build_global_summary
+from tools.no_helmet_analysis.analyze_no_helmet import write_summary
 
 
 class PipelineLogicTest(unittest.TestCase):
@@ -95,6 +98,45 @@ class PipelineLogicTest(unittest.TestCase):
     self.assertTrue(assessments[0].has_helmet)
     self.assertAlmostEqual(assessments[0].violation_confidence, 0.0, places=2)
 
+  def test_violation_mode_can_fallback_to_missing_positive_ppe(self) -> None:
+    roi = [(0, 0), (500, 0), (500, 500), (0, 500)]
+    people = [Detection("person", 0.95, (100, 100, 220, 360))]
+
+    assessments = match_violation_detections_to_people(
+      people,
+      [],
+      [],
+      roi,
+      match_region="torso",
+      fallback_to_missing_positive=True,
+    )
+
+    self.assertEqual(len(assessments), 1)
+    self.assertFalse(assessments[0].has_helmet)
+    self.assertGreater(assessments[0].violation_confidence, 0.0)
+    self.assertEqual(assessments[0].assessment_state, "uncertain")
+    self.assertEqual(assessments[0].violation_mode, "fallback")
+
+  def test_positive_ppe_match_vetoes_missing_positive_fallback(self) -> None:
+    roi = [(0, 0), (500, 0), (500, 500), (0, 500)]
+    people = [Detection("person", 0.95, (100, 100, 220, 360))]
+    vests = [Detection("safety-vest", 0.82, (120, 150, 205, 300))]
+
+    assessments = match_violation_detections_to_people(
+      people,
+      vests,
+      [],
+      roi,
+      match_region="torso",
+      helmet_overlap_threshold=0.15,
+      fallback_to_missing_positive=True,
+    )
+
+    self.assertEqual(len(assessments), 1)
+    self.assertTrue(assessments[0].has_helmet)
+    self.assertAlmostEqual(assessments[0].helmet_confidence or 0, 0.82, places=2)
+    self.assertAlmostEqual(assessments[0].violation_confidence, 0.0, places=2)
+
   def test_global_summary_groups_events_by_track(self) -> None:
     tracker = SimpleTracker(iou_threshold=0.2)
     roi = [(0, 0), (500, 0), (500, 500), (0, 500)]
@@ -164,6 +206,66 @@ class PipelineLogicTest(unittest.TestCase):
     self.assertEqual(summary["violator_count"], 0)
     self.assertEqual(summary["event_count"], 0)
     self.assertIn("Tidak ada pelanggaran", summary["narrative"])
+
+  def test_write_summary_drops_fallback_events_when_track_has_positive_ppe(self) -> None:
+    tracker = SimpleTracker(iou_threshold=0.2)
+    manager = ViolationEventManager(
+      video_path="/tmp/input.mp4",
+      roi_id="roi-vest",
+      output_dir=Path("/tmp/output"),
+      violation_on_frames=1,
+      clean_off_frames=1,
+      veto_on_positive_evidence=True,
+    )
+    roi = [(0, 0), (500, 0), (500, 500), (0, 500)]
+
+    first_assessment = match_violation_detections_to_people(
+      [Detection("person", 0.95, (100, 100, 220, 360))],
+      [],
+      [],
+      roi,
+      match_region="torso",
+      fallback_to_missing_positive=True,
+    )
+    updates = tracker.update(1, 0.1, first_assessment)
+    all_events = manager.process_updates(tracker.tracks, updates)
+
+    second_assessment = match_violation_detections_to_people(
+      [Detection("person", 0.95, (100, 100, 220, 360))],
+      [Detection("safety-vest", 0.82, (120, 150, 205, 300))],
+      [],
+      roi,
+      match_region="torso",
+      helmet_overlap_threshold=0.15,
+      fallback_to_missing_positive=True,
+    )
+    updates = tracker.update(2, 0.2, second_assessment)
+    all_events.extend(manager.process_updates(tracker.tracks, updates))
+    all_events.extend(manager.flush(tracker.tracks))
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+      write_summary(
+        Path(temp_dir),
+        all_events,
+        {
+          "video_path": "/tmp/input.mp4",
+          "duration_seconds": 10.0,
+          "fps": 25.0,
+          "width": 640,
+          "height": 360,
+        },
+        analyzed_frame_count=2,
+        tracks=tracker.tracks,
+        finding_label="no safety vest",
+        veto_on_positive_evidence=True,
+      )
+
+      summary = json.loads((Path(temp_dir) / "summary.json").read_text())
+
+    self.assertEqual(summary["event_count"], 0)
+    self.assertEqual(summary["global_summary"]["event_count"], 0)
+    self.assertEqual(summary["global_summary"]["violator_count"], 0)
+    self.assertEqual(len(summary["events"]), 0)
 
 
 if __name__ == "__main__":

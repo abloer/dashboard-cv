@@ -1,4 +1,5 @@
 export interface NoSafetyVestModuleConfig {
+  modelSource: "deployment-gate" | "manual";
   modelPath: string;
   roiId: string;
   roiConfigPath: string;
@@ -10,12 +11,15 @@ export interface NoSafetyVestModuleConfig {
   cleanOffFrames: string;
   frameStep: string;
   imageSize: string;
+  requiredPpe: string;
+  alertCooldownSeconds: string;
   operationalNotes: string;
 }
 
 const STORAGE_KEY = "dashboard-cv-ut:no-safety-vest-config";
 
 export const DEFAULT_NO_SAFETY_VEST_CONFIG: NoSafetyVestModuleConfig = {
+  modelSource: "deployment-gate",
   modelPath: "/app/models/detect-construction-safety-best.pt",
   roiId: "area-produksi-vest",
   roiConfigPath: "",
@@ -27,6 +31,8 @@ export const DEFAULT_NO_SAFETY_VEST_CONFIG: NoSafetyVestModuleConfig = {
   cleanOffFrames: "2",
   frameStep: "5",
   imageSize: "960",
+  requiredPpe: "safety vest, helmet, safety shoes",
+  alertCooldownSeconds: "90",
   operationalNotes:
     "Gunakan modul ini untuk inspeksi rompi keselamatan pada area produksi, loading point, dan jalur pejalan kaki.",
 };

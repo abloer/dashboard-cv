@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   getHseSafetyRulesDefaults,
   getLatestHseSafetyRulesReport,
@@ -60,7 +61,7 @@ const humanizeRequestError = (error: unknown) => {
 };
 
 export default function HseSafetyRulesRun() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const { data: mediaItems = [] } = useMediaRegistry();
   const [report, setReport] = useState<HseSafetyRulesReport | null>(null);
@@ -75,6 +76,20 @@ export default function HseSafetyRulesRun() {
     () => mediaItems.find((item) => item.id === selectedSourceId) || null,
     [mediaItems, selectedSourceId]
   );
+  const selectableSources = useMemo(
+    () =>
+      [...mediaItems]
+        .filter((item) => item.analytics.includes("HSE"))
+        .sort((left, right) => left.name.localeCompare(right.name, "id-ID", { sensitivity: "base" })),
+    [mediaItems]
+  );
+  const sourceSupportsHse = selectedSource?.analytics.includes("HSE") ?? false;
+
+  const handleSourceChange = (nextSourceId: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("sourceId", nextSourceId);
+    setSearchParams(nextParams);
+  };
 
   useEffect(() => {
     let ignore = false;
@@ -140,6 +155,14 @@ export default function HseSafetyRulesRun() {
       toast({
         title: "Pilih source dari Media Sources",
         description: "HSE assessment hanya bisa dijalankan untuk source yang sudah dipilih.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!sourceSupportsHse) {
+      toast({
+        title: "Kategori HSE belum aktif",
+        description: "Aktifkan kategori output HSE pada source ini sebelum menjalankan assessment safety rules.",
         variant: "destructive",
       });
       return;
@@ -210,12 +233,53 @@ export default function HseSafetyRulesRun() {
             <div className="space-y-2">
               <p className="font-medium text-foreground">Belum ada source yang dipilih</p>
               <p>
-                Buka halaman ini dari `Analysis Setup` atau `Safety Rules Setup` dengan source terpilih agar assessment HSE bisa dijalankan pada konteks source yang benar.
+                Buka source yang ingin dievaluasi dari <code>Media Sources</code>, lalu masuk ke launcher <code>Run Analysis</code> untuk membuka assessment HSE pada konteks source yang benar.
               </p>
             </div>
           </CardContent>
         </Card>
       )}
+
+      <Card className="mb-6 border-border/60 bg-secondary/10">
+        <CardContent className="grid gap-4 p-5 md:grid-cols-[1.2fr,0.8fr] md:items-end">
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Pilih Source</p>
+            <Select value={selectedSourceId ?? undefined} onValueChange={handleSourceChange}>
+              <SelectTrigger>
+                <SelectValue placeholder="Pilih source untuk HSE assessment" />
+              </SelectTrigger>
+              <SelectContent>
+                {selectableSources.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name} • {item.location}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Halaman ini biasanya dibuka dari <code>Media Sources &gt; Run Analysis</code>. Dropdown ini tetap tersedia agar operator bisa berpindah ke source HSE lain tanpa meninggalkan halaman assessment.
+            </p>
+          </div>
+          <div className="space-y-2 rounded-lg border border-border/70 bg-background/40 p-4 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Source Aktif</p>
+            <p>{selectedSource ? `${selectedSource.name} siap untuk assessment HSE.` : "Belum ada source aktif."}</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {selectedSource && !sourceSupportsHse ? (
+        <Card className="mb-6 border-amber-500/30 bg-amber-500/10">
+          <CardContent className="flex items-start gap-3 p-5 text-sm text-amber-100">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="space-y-2">
+              <p className="font-medium text-foreground">Source ini belum mengaktifkan kategori HSE</p>
+              <p>
+                Modul <code>Safety Rules Assessment</code> hanya relevan untuk source dengan kategori output <code>HSE</code>. Aktifkan kategori tersebut di <code>Media Sources</code> jika source ini memang perlu dievaluasi sebagai HSE.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
@@ -279,7 +343,7 @@ export default function HseSafetyRulesRun() {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Button type="button" onClick={handleRunAssessment} disabled={!selectedSourceId || isRunning} className="gap-2">
+              <Button type="button" onClick={handleRunAssessment} disabled={!selectedSourceId || !sourceSupportsHse || isRunning} className="gap-2">
                 {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
                 {isRunning ? "Menjalankan assessment..." : "Run HSE Assessment"}
               </Button>

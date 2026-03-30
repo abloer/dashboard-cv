@@ -14,6 +14,7 @@ dist-ssr
 .venv-analysis/
 .venv/
 venv/
+runtime-analysis/
 __pycache__/
 *.py[cod]
 models/*.pt

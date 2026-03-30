@@ -1,9 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { HardHat, RotateCcw, Save, ShieldAlert } from "lucide-react";
-import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Header } from "@/components/layout/Header";
-import { useMediaRegistry } from "@/hooks/useMediaRegistry";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,31 +9,66 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  DEFAULT_NO_SAFETY_VEST_CONFIG,
   type NoSafetyVestModuleConfig,
   readNoSafetyVestConfig,
   resetNoSafetyVestConfig,
   writeNoSafetyVestConfig,
 } from "@/lib/noSafetyVestConfig";
-import { getModuleConfig, updateModuleConfig } from "@/lib/moduleConfigs";
+import {
+  getModuleConfigEnvelope,
+  updateModuleConfig,
+  type ModuleConfigActiveModel,
+} from "@/lib/moduleConfigs";
 
 export default function NoSafetyVestSetup() {
-  const [searchParams] = useSearchParams();
   const { toast } = useToast();
-  const { data: mediaItems = [] } = useMediaRegistry();
   const [config, setConfig] = useState<NoSafetyVestModuleConfig>(() => readNoSafetyVestConfig());
+  const [activeModel, setActiveModel] = useState<ModuleConfigActiveModel | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
-
-  const selectedSourceId = searchParams.get("sourceId");
-  const selectedSource = mediaItems.find((item) => item.id === selectedSourceId) || null;
+  const readiness = useMemo(
+    () => [
+      {
+        label: "Model Detector",
+        ready: config.modelPath.trim().length > 0,
+        detail: config.modelPath.trim() || "Model path belum diisi.",
+      },
+      {
+        label: "Label Mapping",
+        ready: config.vestLabels.trim().length > 0 && config.violationLabels.trim().length > 0,
+        detail: `${config.vestLabels || "--"} | ${config.violationLabels || "--"}`,
+      },
+      {
+        label: "Rule Smoothing",
+        ready:
+          config.violationOnFrames.trim().length > 0 &&
+          config.cleanOffFrames.trim().length > 0 &&
+          config.frameStep.trim().length > 0,
+        detail: `On ${config.violationOnFrames || "--"} • Off ${config.cleanOffFrames || "--"} • Step ${config.frameStep || "--"}`,
+      },
+      {
+        label: "Policy Baseline",
+        ready: config.requiredPpe.trim().length > 0 && config.alertCooldownSeconds.trim().length > 0,
+        detail: `PPE wajib: ${config.requiredPpe || "--"} • Cooldown ${config.alertCooldownSeconds || "--"}s`,
+      },
+    ],
+    [config]
+  );
+  const readyCount = readiness.filter((item) => item.ready).length;
 
   useEffect(() => {
     let ignore = false;
     setIsSyncing(true);
-    getModuleConfig<NoSafetyVestModuleConfig>("no-safety-vest")
-      .then((serverConfig) => {
+    getModuleConfigEnvelope<NoSafetyVestModuleConfig>("no-safety-vest")
+      .then((payload) => {
         if (ignore) return;
-        setConfig(serverConfig);
-        writeNoSafetyVestConfig(serverConfig);
+        const mergedConfig = {
+          ...DEFAULT_NO_SAFETY_VEST_CONFIG,
+          ...payload.config,
+        };
+        setConfig(mergedConfig);
+        setActiveModel(payload.activeModel);
+        writeNoSafetyVestConfig(mergedConfig);
       })
       .catch(() => {
         if (ignore) return;
@@ -110,45 +143,17 @@ export default function NoSafetyVestSetup() {
     <DashboardLayout>
       <Header
         title="PPE • No Safety Vest Setup"
-        subtitle="Konfigurasi awal modul inspeksi pekerja tanpa rompi keselamatan untuk source yang dipilih."
+        subtitle="Workspace setup default module untuk detector no safety vest dan baseline policy yang akan dipakai saat source PPE dijalankan dari Media Sources."
       />
 
-      {selectedSource ? (
-        <Card className="mb-6 border-cyan-500/20 bg-cyan-500/5">
-          <CardContent className="grid gap-4 p-5 md:grid-cols-[1.5fr,1fr,1fr]">
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Source Konteks</p>
-              <p className="text-lg font-semibold text-foreground">{selectedSource.name}</p>
-              <p className="text-sm text-muted-foreground">
-                {selectedSource.location} • {selectedSource.type === "upload" ? "Upload Video" : "Camera Stream"}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Kategori Output</p>
-              <div className="flex flex-wrap gap-2">
-                {selectedSource.analytics.map((analytic) => (
-                  <Badge key={analytic} variant="outline" className="border-primary/20">
-                    {analytic}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Status Modul</p>
-              <p className="text-sm text-muted-foreground">
-                Setup aktif. Preset default bisa disimpan sekarang, sedangkan workflow eksekusi akan mengikuti source dari Media Sources.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
-
       <div className="grid gap-6 xl:grid-cols-[1.05fr,0.95fr]">
+        <div className="space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Konfigurasi Default Modul</CardTitle>
+            <CardTitle className="text-xl">Detector Setup</CardTitle>
             <CardDescription>
-              Preset baseline untuk inspeksi `No Safety Vest` yang disimpan terpusat di server sebelum dihubungkan ke engine deteksi spesifik.
+              Preset detector ini menjadi baseline saat operator menjalankan modul <code>PPE • No Safety Vest</code> dari{" "}
+              <code>Media Sources &gt; Run Analysis</code>.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -156,6 +161,23 @@ export default function NoSafetyVestSetup() {
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium text-foreground">Default Model Path</label>
                 <Input value={config.modelPath} onChange={(event) => handleChange("modelPath", event.target.value)} />
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <Badge variant={config.modelSource === "deployment-gate" ? "default" : "secondary"}>
+                    {config.modelSource === "deployment-gate" ? "Deployment Gate" : "Manual Override"}
+                  </Badge>
+                  {activeModel ? (
+                    <span>
+                      Model aktif: <span className="text-foreground">{activeModel.name}</span>
+                    </span>
+                  ) : (
+                    <span>Belum ada model aktif dari Deployment Gate untuk modul ini.</span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={useDeploymentGateModel} disabled={isSyncing || !activeModel}>
+                    Gunakan Model Aktif
+                  </Button>
+                </div>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Default ROI ID</label>
@@ -197,6 +219,30 @@ export default function NoSafetyVestSetup() {
                 <label className="text-sm font-medium text-foreground">Image Size</label>
                 <Input value={config.imageSize} onChange={(event) => handleChange("imageSize", event.target.value)} />
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-xl">Policy / Rules Engine</CardTitle>
+            <CardDescription>
+              Baseline policy ini melengkapi detector setup agar pelanggaran rompi keselamatan langsung terbaca sebagai keputusan operasional default.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-medium text-foreground">Required PPE</label>
+                <Input value={config.requiredPpe} onChange={(event) => handleChange("requiredPpe", event.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Alert Cooldown (s)</label>
+                <Input
+                  value={config.alertCooldownSeconds}
+                  onChange={(event) => handleChange("alertCooldownSeconds", event.target.value)}
+                />
+              </div>
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium text-foreground">Operational Notes</label>
                 <Textarea value={config.operationalNotes} onChange={(event) => handleChange("operationalNotes", event.target.value)} className="min-h-[110px]" />
@@ -215,16 +261,43 @@ export default function NoSafetyVestSetup() {
             </div>
           </CardContent>
         </Card>
+        </div>
 
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle className="text-xl">Peran Modul</CardTitle>
+              <CardTitle className="text-xl">Readiness & Peran Modul</CardTitle>
               <CardDescription>
-                Modul ini disiapkan agar PPE selain helm juga sudah punya workspace konfigurasi aktif.
+                Menu `Analysis Modules` dipakai untuk menyiapkan default detector dan policy. Proses run aktual tetap berjalan per-source dari `Media Sources`.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm text-muted-foreground">
+              <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Kesiapan Modul PPE • No Safety Vest</p>
+                    <p className="text-xs text-muted-foreground">
+                      {readyCount} dari {readiness.length} komponen inti sudah terisi.
+                    </p>
+                  </div>
+                  <Badge variant={readyCount === readiness.length ? "default" : "secondary"}>
+                    {readyCount === readiness.length ? "Ready" : "Needs Review"}
+                  </Badge>
+                </div>
+                <div className="mt-4 grid gap-3">
+                  {readiness.map((item) => (
+                    <div key={item.label} className="rounded-lg border border-border/70 bg-background/40 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-foreground">{item.label}</p>
+                        <Badge variant={item.ready ? "default" : "secondary"}>
+                          {item.ready ? "Ready" : "Missing"}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
               <div className="flex items-start gap-3 rounded-lg border border-border/70 bg-secondary/10 p-4">
                 <HardHat className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                 <p>
@@ -234,8 +307,44 @@ export default function NoSafetyVestSetup() {
               <div className="flex items-start gap-3 rounded-lg border border-border/70 bg-secondary/10 p-4">
                 <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                 <p>
-                  Engine deteksi final masih bisa berubah, tetapi operator sudah dapat menyusun default label, threshold, dan catatan operasional dari sekarang.
+                  Selain detector setup, modul ini sekarang menyimpan policy baseline seperti PPE wajib, cooldown alert, dan catatan operasional agar run per-source langsung konsisten.
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xl">Preset Aktif Saat Ini</CardTitle>
+              <CardDescription>
+                Ringkasan singkat konfigurasi default yang akan diturunkan ke halaman run.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Model</p>
+                <p className="mt-1 break-all text-sm text-foreground">{config.modelPath}</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Threshold</p>
+                  <p className="mt-1 text-sm text-foreground">
+                    Conf {config.confidenceThreshold} • IoU {config.iouThreshold}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Smoothing</p>
+                  <p className="mt-1 text-sm text-foreground">
+                    On {config.violationOnFrames} • Off {config.cleanOffFrames} • Step {config.frameStep}
+                  </p>
+                </div>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Policy Baseline</p>
+                <p className="mt-1 text-sm text-foreground">
+                  PPE: {config.requiredPpe} | Cooldown: {config.alertCooldownSeconds}s
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">{config.operationalNotes}</p>
               </div>
             </CardContent>
           </Card>
@@ -244,3 +353,23 @@ export default function NoSafetyVestSetup() {
     </DashboardLayout>
   );
 }
+  const useDeploymentGateModel = () => {
+    if (!activeModel?.modelPath) {
+      toast({
+        title: "Belum ada model aktif",
+        description: "Deployment Gate belum punya model aktif untuk modul PPE • No Safety Vest.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setConfig((current) => ({
+      ...current,
+      modelSource: "deployment-gate",
+      modelPath: activeModel.modelPath,
+    }));
+    toast({
+      title: "Model aktif dipakai",
+      description: `Konfigurasi sekarang mengikuti model aktif ${activeModel.name} dari Deployment Gate.`,
+    });
+  };

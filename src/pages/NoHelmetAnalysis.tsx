@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
@@ -43,7 +44,7 @@ import {
   type NoHelmetAnalysisSummary,
   type VideoPreviewResponse,
 } from "@/lib/noHelmetAnalysis";
-import { COMMUNITY_DEMO_PRESET, readNoHelmetConfig } from "@/lib/noHelmetConfig";
+import { COMMUNITY_DEMO_PRESET, STRICT_DISTANCE_PRESET, readNoHelmetConfig } from "@/lib/noHelmetConfig";
 
 type RoiPoint = [number, number];
 
@@ -196,7 +197,7 @@ const buildClientGlobalSummary = (events: NoHelmetAnalysisEvent[]): NoHelmetGlob
 
 export default function NoHelmetAnalysis() {
   const { toast } = useToast();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: mediaItems = [] } = useMediaRegistry();
   const overlayRef = useRef<SVGSVGElement | null>(null);
   const lastAppliedSourceIdRef = useRef<string | null>(null);
@@ -241,8 +242,22 @@ export default function NoHelmetAnalysis() {
     () => mediaItems.find((item) => item.id === selectedSourceId) || null,
     [mediaItems, selectedSourceId]
   );
+  const selectableSources = useMemo(
+    () =>
+      [...mediaItems]
+        .filter((item) => item.analytics.includes("PPE"))
+        .sort((left, right) => left.name.localeCompare(right.name, "id-ID", { sensitivity: "base" })),
+    [mediaItems]
+  );
+  const sourceSupportsPpe = selectedSource?.analytics.includes("PPE") ?? false;
   const isCameraAutoSource =
     selectedSource?.type === "camera" && selectedSource.executionMode !== "manual";
+
+  const handleSourceChange = (nextSourceId: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("sourceId", nextSourceId);
+    setSearchParams(nextParams);
+  };
 
   useEffect(() => {
     let ignore = false;
@@ -258,7 +273,9 @@ export default function NoHelmetAnalysis() {
             const legacyLocalPath =
               current.modelPath.startsWith("/Users/") ||
               current.modelPath === COMMUNITY_DEMO_PRESET.suggestedModelPath;
-            if (!current.modelPath || legacyLocalPath) {
+            const shouldUseServerModel =
+              savedConfig.modelSource !== "manual" || !current.modelPath || legacyLocalPath;
+            if (shouldUseServerModel) {
               return {
                 ...current,
                 modelPath: defaults.defaultModelPath,
@@ -367,6 +384,7 @@ export default function NoHelmetAnalysis() {
   }, [formState.frameStep, formState.violationOnFrames, previewFps]);
   const canRunAnalysis =
     Boolean(selectedSource) &&
+    sourceSupportsPpe &&
     formState.videoPath.trim().length > 0 &&
     formState.modelPath.trim().length > 0 &&
     (hasValidRoi || hasCustomRoiPath);
@@ -411,6 +429,28 @@ export default function NoHelmetAnalysis() {
     toast({
       title: "Preset demo diterapkan",
       description: "Model, label, dan parameter recall telah disesuaikan untuk model komunitas DetectConstructionSafety.",
+    });
+  };
+
+  const applyStrictDistancePreset = () => {
+    setFormState((current) => ({
+      ...current,
+      modelPath: current.modelPath || STRICT_DISTANCE_PRESET.suggestedModelPath,
+      confidenceThreshold: STRICT_DISTANCE_PRESET.confidenceThreshold,
+      iouThreshold: STRICT_DISTANCE_PRESET.iouThreshold,
+      topRatio: STRICT_DISTANCE_PRESET.topRatio,
+      helmetOverlapThreshold: STRICT_DISTANCE_PRESET.helmetOverlapThreshold,
+      personLabels: STRICT_DISTANCE_PRESET.personLabels,
+      helmetLabels: STRICT_DISTANCE_PRESET.helmetLabels,
+      violationLabels: STRICT_DISTANCE_PRESET.violationLabels,
+      violationOnFrames: STRICT_DISTANCE_PRESET.violationOnFrames,
+      cleanOffFrames: STRICT_DISTANCE_PRESET.cleanOffFrames,
+      frameStep: STRICT_DISTANCE_PRESET.frameStep,
+      imageSize: STRICT_DISTANCE_PRESET.imageSize,
+    }));
+    toast({
+      title: "Preset strict diterapkan",
+      description: "Preset konservatif untuk kamera jauh diterapkan agar false positive no helmet berkurang.",
     });
   };
 
@@ -576,6 +616,14 @@ export default function NoHelmetAnalysis() {
       });
       return;
     }
+    if (!sourceSupportsPpe) {
+      toast({
+        title: "Kategori PPE belum aktif",
+        description: "Aktifkan kategori output PPE pada source ini sebelum menjalankan modul No Helmet.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsAnalyzing(true);
     try {
@@ -651,6 +699,33 @@ export default function NoHelmetAnalysis() {
         subtitle="Halaman batch/manual untuk menjalankan analisis PPE rule no helmet pada source yang dipilih dari Media Sources."
       />
 
+      <Card className="mb-6 border-border/60 bg-secondary/10">
+        <CardContent className="grid gap-4 p-5 md:grid-cols-[1.2fr,0.8fr] md:items-end">
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Pilih Source</p>
+            <Select value={selectedSourceId ?? undefined} onValueChange={handleSourceChange}>
+              <SelectTrigger>
+                <SelectValue placeholder="Pilih source untuk PPE • No Helmet Run" />
+              </SelectTrigger>
+              <SelectContent>
+                {selectableSources.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name} • {item.location}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Halaman ini biasanya dibuka dari <code>Media Sources &gt; Run Analysis</code>. Dropdown ini tetap tersedia agar operator bisa mengganti source PPE lain tanpa keluar dari halaman run.
+            </p>
+          </div>
+          <div className="space-y-2 rounded-lg border border-border/70 bg-background/40 p-4 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Source Aktif</p>
+            <p>{selectedSource ? `${selectedSource.name} siap untuk run no helmet.` : "Belum ada source aktif."}</p>
+          </div>
+        </CardContent>
+      </Card>
+
       {selectedSource && (
         <Card className="mb-6 border-cyan-500/20 bg-cyan-500/5">
           <CardContent className="grid gap-4 p-5 md:grid-cols-[1.3fr,repeat(4,minmax(0,1fr))]">
@@ -725,6 +800,20 @@ export default function NoHelmetAnalysis() {
               <p>
                 Upload video dan pendaftaran camera stream dilakukan dari `Media Sources`. Buka source yang ingin dianalisis
                 dari sana, lalu masuk lagi ke halaman ini melalui action `Run Analysis`.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {selectedSource && !sourceSupportsPpe ? (
+        <Card className="mb-6 border-amber-500/30 bg-amber-500/10">
+          <CardContent className="flex items-start gap-3 p-5 text-sm text-amber-100">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div className="space-y-2">
+              <p className="font-medium text-foreground">Source ini belum mengaktifkan kategori PPE</p>
+              <p>
+                Modul <code>No Helmet Run</code> hanya relevan untuk source dengan kategori output <code>PPE</code>. Aktifkan kategori tersebut di <code>Media Sources</code> jika source ini memang perlu dianalisis.
               </p>
             </div>
           </CardContent>
@@ -940,6 +1029,26 @@ export default function NoHelmetAnalysis() {
               </p>
             </div>
 
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Strict Distant-View Preset</p>
+                  <p className="text-xs text-muted-foreground">
+                    Rekomendasi untuk objek kecil/jauh dan scene yang rawan false positive.
+                  </p>
+                </div>
+                <Button type="button" variant="outline" onClick={applyStrictDistancePreset}>
+                  Gunakan Preset Strict
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Preset ini lebih konservatif: `conf {STRICT_DISTANCE_PRESET.confidenceThreshold}`, `frame step {STRICT_DISTANCE_PRESET.frameStep}`, `on {STRICT_DISTANCE_PRESET.violationOnFrames}`, `off {STRICT_DISTANCE_PRESET.cleanOffFrames}`, `imgsz {STRICT_DISTANCE_PRESET.imageSize}`.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Label `no-hardhat` langsung dikosongkan agar detector lebih mengandalkan pencocokan `person + hardhat`.
+              </p>
+            </div>
+
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-medium text-foreground">Model Path</label>
@@ -991,7 +1100,7 @@ export default function NoHelmetAnalysis() {
                 <Input
                   value={formState.violationLabels}
                   onChange={(event) => handleChange("violationLabels", event.target.value)}
-                  placeholder="no-hardhat"
+                  placeholder="Opsional. Kosongkan untuk hanya memakai person + hardhat matching"
                 />
               </div>
 

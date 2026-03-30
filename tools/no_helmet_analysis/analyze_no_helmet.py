@@ -25,7 +25,7 @@ from tools.no_helmet_analysis.core import (
 
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(
-    description="Analyze a video file and generate no-helmet violation events."
+    description="Analyze a video file and generate PPE violation events."
   )
   parser.add_argument("--video-path", required=True, help="Path to the input video.")
   parser.add_argument("--roi-config-path", required=True, help="Path to the ROI JSON config.")
@@ -42,6 +42,28 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--clean-off-frames", type=int, default=2)
   parser.add_argument("--frame-step", type=int, default=5, help="Analyze every Nth frame.")
   parser.add_argument("--image-size", type=int, default=960, help="YOLO inference image size.")
+  parser.add_argument("--event-type", default="no_helmet", help="Event type slug written into summary and CSV.")
+  parser.add_argument(
+    "--finding-label",
+    default="no helmet",
+    help="Human-readable violation label used in narrative output.",
+  )
+  parser.add_argument(
+    "--match-region",
+    choices=["head", "torso", "full"],
+    default="head",
+    help="Body region used to match positive PPE detections back to the detected person.",
+  )
+  parser.add_argument(
+    "--fallback-to-missing-positive",
+    action="store_true",
+    help="Treat a tracked person as a violation when no positive PPE match is found, even if the model does not emit a direct negative label.",
+  )
+  parser.add_argument(
+    "--veto-on-positive-evidence",
+    action="store_true",
+    help="Drop fallback-derived events for tracks that also show positive PPE evidence elsewhere in the same track.",
+  )
   parser.add_argument("--keep-frames", action="store_true", help="Keep extracted frames on disk.")
   return parser.parse_args()
 
@@ -162,15 +184,22 @@ class UltralyticsDetector:
         2,
       )
     x1, y1, x2, y2 = [int(value) for value in track_bbox]
-    self.cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 2)
-    label = f"{event.event_type} track={event.track_id} conf={event.max_confidence:.2f}"
+    is_uncertain = event.status == "uncertain"
+    color = (0, 191, 255) if is_uncertain else (0, 0, 255)
+    self.cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+    event_label = (
+      f"uncertain-{event.event_type}"
+      if is_uncertain
+      else event.event_type
+    )
+    label = f"{event_label} track={event.track_id} conf={event.max_confidence:.2f}"
     self.cv2.putText(
       annotated,
       label,
       (x1, max(30, y1 - 10)),
       self.cv2.FONT_HERSHEY_SIMPLEX,
       0.7,
-      (0, 0, 255),
+      color,
       2,
       self.cv2.LINE_AA,
     )
@@ -195,14 +224,27 @@ def is_stable_track(track_summary: dict[str, Any]) -> bool:
   return track_summary["event_count"] > 0 or track_summary["observed_frame_count"] >= 10
 
 
-def build_global_summary(events: list[EventRecord], tracks: dict[int, Track]) -> dict[str, Any]:
+def build_global_summary(
+  events: list[EventRecord],
+  tracks: dict[int, Track],
+  finding_label: str = "no helmet",
+) -> dict[str, Any]:
+  countable_events = [event for event in events if event.status == "violation"]
+  uncertain_events = [event for event in events if event.status == "uncertain"]
   detected_tracks: list[dict[str, Any]] = []
-  events_by_track: dict[int, list[EventRecord]] = {}
-  for event in events:
-    events_by_track.setdefault(event.track_id, []).append(event)
+  countable_events_by_track: dict[int, list[EventRecord]] = {}
+  uncertain_events_by_track: dict[int, list[EventRecord]] = {}
+  for event in countable_events:
+    countable_events_by_track.setdefault(event.track_id, []).append(event)
+  for event in uncertain_events:
+    uncertain_events_by_track.setdefault(event.track_id, []).append(event)
 
   for track in sorted(tracks.values(), key=lambda item: item.track_id):
-    track_events = sorted(events_by_track.get(track.track_id, []), key=lambda item: item.start_time_seconds)
+    track_events = sorted(countable_events_by_track.get(track.track_id, []), key=lambda item: item.start_time_seconds)
+    uncertain_track_events = sorted(
+      uncertain_events_by_track.get(track.track_id, []),
+      key=lambda item: item.start_time_seconds,
+    )
     detected_tracks.append(
       {
         "track_id": track.track_id,
@@ -211,13 +253,21 @@ def build_global_summary(events: list[EventRecord], tracks: dict[int, Track]) ->
         "first_seen_seconds": track.first_seen_time_seconds,
         "last_seen_seconds": track.last_seen_time_seconds,
         "event_count": len(track_events),
+        "uncertain_event_count": len(uncertain_track_events),
         "snapshot_count": sum(1 for event in track_events if event.snapshot_path),
         "max_violation_confidence": max((event.max_confidence for event in track_events), default=0.0),
+        "max_uncertain_confidence": max((event.max_confidence for event in uncertain_track_events), default=0.0),
         "total_violation_duration_seconds": sum(
           max(0.0, event.end_time_seconds - event.start_time_seconds) for event in track_events
         ),
+        "total_uncertain_duration_seconds": sum(
+          max(0.0, event.end_time_seconds - event.start_time_seconds) for event in uncertain_track_events
+        ),
         "roi_ids": sorted({event.roi_id for event in track_events}),
         "event_ids": [event.event_id for event in track_events],
+        "uncertain_event_ids": [event.event_id for event in uncertain_track_events],
+        "positive_ppe_seen": track.positive_ppe_seen,
+        "max_positive_ppe_confidence": track.max_positive_ppe_confidence,
       }
     )
 
@@ -235,6 +285,8 @@ def build_global_summary(events: list[EventRecord], tracks: dict[int, Track]) ->
       "stable_detected_tracks_in_roi_count": 0,
       "violator_count": 0,
       "event_count": 0,
+      "uncertain_event_count": 0,
+      "uncertain_track_count": 0,
       "snapshot_count": 0,
       "first_event_seconds": None,
       "last_event_seconds": None,
@@ -249,7 +301,7 @@ def build_global_summary(events: list[EventRecord], tracks: dict[int, Track]) ->
   snapshot_count = 0
   total_violation_duration_seconds = 0.0
 
-  for event in events:
+  for event in countable_events:
     total_violation_duration_seconds += max(0.0, event.end_time_seconds - event.start_time_seconds)
     if event.snapshot_path:
       snapshot_count += 1
@@ -285,27 +337,39 @@ def build_global_summary(events: list[EventRecord], tracks: dict[int, Track]) ->
     for summary in sorted(grouped.values(), key=lambda item: item["track_id"])
   ]
 
-  first_event_seconds = min((event.start_time_seconds for event in events), default=None)
-  last_event_seconds = max((event.end_time_seconds for event in events), default=None)
+  first_event_seconds = min((event.start_time_seconds for event in countable_events), default=None)
+  last_event_seconds = max((event.end_time_seconds for event in countable_events), default=None)
+  uncertain_count = len(uncertain_events)
+  uncertain_track_count = len({event.track_id for event in uncertain_events})
   violator_count = len(violators)
-  if len(events) == 0:
+  if len(countable_events) == 0:
     narrative = (
       f"Estimasi jumlah orang yang terlihat di video adalah {stable_detected_track_count}, "
       f"berdasarkan track stabil yang berhasil dipertahankan sistem. "
       f"Sebagai detail teknis, tracker sempat membuat {detected_track_count} raw track dan "
       f"{stable_detected_tracks_in_roi_count} track stabil berada di area kerja/ROI. "
-      "Tidak ada pelanggaran no helmet yang tercatat pada run ini."
+      f"Tidak ada pelanggaran {finding_label} yang tercatat pada run ini."
     )
+    if uncertain_count > 0:
+      narrative += (
+        f" Namun sistem menandai {uncertain_count} indikasi yang masih belum pasti "
+        f"pada {uncertain_track_count} track dan belum menghitungnya sebagai violation final."
+      )
   else:
     narrative = (
       f"Estimasi jumlah orang yang terlihat di video adalah {stable_detected_track_count}, "
       f"berdasarkan track stabil yang berhasil dipertahankan sistem. "
       f"Dari jumlah tersebut, {stable_detected_tracks_in_roi_count} berada di area kerja/ROI dan "
-      f"{violator_count} pekerja/track unik melakukan pelanggaran no helmet. "
+      f"{violator_count} pekerja/track unik melakukan pelanggaran {finding_label}. "
       f"Sebagai detail teknis, tracker sempat membuat {detected_track_count} raw track. "
-      f"Sistem mencatat {len(events)} event dengan {snapshot_count} screencapture bukti "
+      f"Sistem mencatat {len(countable_events)} event dengan {snapshot_count} screencapture bukti "
       f"pada rentang {(first_event_seconds or 0.0):.2f} s sampai {(last_event_seconds or 0.0):.2f} s."
     )
+    if uncertain_count > 0:
+      narrative += (
+        f" Selain itu ada {uncertain_count} indikasi tambahan yang masih berstatus uncertain "
+        f"dan belum dihitung sebagai violation final."
+      )
 
   return {
     "detected_track_count": detected_track_count,
@@ -313,7 +377,9 @@ def build_global_summary(events: list[EventRecord], tracks: dict[int, Track]) ->
     "stable_detected_track_count": stable_detected_track_count,
     "stable_detected_tracks_in_roi_count": stable_detected_tracks_in_roi_count,
     "violator_count": violator_count,
-    "event_count": len(events),
+    "event_count": len(countable_events),
+    "uncertain_event_count": uncertain_count,
+    "uncertain_track_count": uncertain_track_count,
     "snapshot_count": snapshot_count,
     "first_event_seconds": first_event_seconds,
     "last_event_seconds": last_event_seconds,
@@ -331,8 +397,20 @@ def write_summary(
   metadata: dict[str, Any],
   analyzed_frame_count: int,
   tracks: dict[int, Track],
+  finding_label: str,
+  veto_on_positive_evidence: bool = False,
 ) -> None:
   output_dir.mkdir(parents=True, exist_ok=True)
+  reportable_events = [
+    event
+    for event in events
+    if not (
+      veto_on_positive_evidence and
+      tracks.get(event.track_id) is not None and
+      tracks[event.track_id].positive_ppe_seen
+    )
+  ]
+  global_summary = build_global_summary(reportable_events, tracks, finding_label)
   summary = {
     "video_path": metadata["video_path"],
     "duration_seconds": metadata["duration_seconds"],
@@ -340,9 +418,9 @@ def write_summary(
     "frame_width": metadata["width"],
     "frame_height": metadata["height"],
     "analyzed_frame_count": analyzed_frame_count,
-    "event_count": len(events),
-    "global_summary": build_global_summary(events, tracks),
-    "events": [asdict(event) for event in events],
+    "event_count": global_summary["event_count"],
+    "global_summary": global_summary,
+    "events": [asdict(event) for event in reportable_events],
   }
   (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
 
@@ -360,10 +438,12 @@ def write_summary(
         "track_id",
         "snapshot_path",
         "roi_id",
+        "status",
+        "detection_mode",
       ],
     )
     writer.writeheader()
-    for event in events:
+    for event in reportable_events:
       writer.writerow(asdict(event))
 
 
@@ -395,8 +475,10 @@ def main() -> int:
     video_path=str(video_path),
     roi_id=roi_id,
     output_dir=output_dir,
+    event_type=args.event_type,
     violation_on_frames=args.violation_on_frames,
     clean_off_frames=args.clean_off_frames,
+    veto_on_positive_evidence=args.veto_on_positive_evidence,
   )
 
   all_events: list[EventRecord] = []
@@ -436,6 +518,8 @@ def main() -> int:
           top_ratio=args.top_ratio,
           helmet_overlap_threshold=args.helmet_overlap_threshold,
           overlap_threshold=args.helmet_overlap_threshold,
+          match_region=args.match_region,
+          fallback_to_missing_positive=args.fallback_to_missing_positive,
         )
       else:
         assessments = match_helmets_to_people(
@@ -444,6 +528,7 @@ def main() -> int:
           roi_polygon=roi_polygon,
           top_ratio=args.top_ratio,
           overlap_threshold=args.helmet_overlap_threshold,
+          match_region=args.match_region,
         )
       time_seconds = (
         capture.get(detector.cv2.CAP_PROP_POS_MSEC) / 1000.0
@@ -478,7 +563,15 @@ def main() -> int:
       detector.annotate_and_save(best_frame_image, event, best_bbox, roi_polygon)
     all_events.append(event)
 
-  write_summary(output_dir, all_events, metadata, analyzed_frame_count, tracker.tracks)
+  write_summary(
+    output_dir,
+    all_events,
+    metadata,
+    analyzed_frame_count,
+    tracker.tracks,
+    args.finding_label,
+    veto_on_positive_evidence=args.veto_on_positive_evidence,
+  )
   print(json.dumps({"ok": True, "output_dir": str(output_dir), "event_count": len(all_events)}, indent=2))
   return 0
 

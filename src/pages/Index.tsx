@@ -393,19 +393,10 @@ export default function Index() {
   };
 
   const openRunAnalysis = (item: MediaSource) => {
-    if (item.type === "camera" && item.executionMode !== "manual") {
-      navigate(`/live-monitoring?sourceId=${encodeURIComponent(item.id)}`);
-      toast({
-        title: "Live Monitoring dibuka",
-        description: `${item.name} menggunakan mode ${formatExecutionMode(item.executionMode)} dan diarahkan ke halaman monitoring otomatis.`,
-      });
-      return;
-    }
-
-    navigate(`/no-helmet-analysis?sourceId=${encodeURIComponent(item.id)}`);
+    navigate(`/run-analysis?sourceId=${encodeURIComponent(item.id)}`);
     toast({
       title: "Run Analysis dibuka",
-      description: `${item.name} siap dieksekusi secara manual pada halaman PPE • No Helmet Run.`,
+      description: `${item.name} siap menjalankan modul analysis sesuai kategori output yang aktif pada source ini.`,
     });
   };
 

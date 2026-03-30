@@ -1,4 +1,5 @@
 import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import type { AnalysisFinding } from "@/lib/analysisFindings";
 import type { MediaExecutionMode, MediaMonitoringStatus, MediaStatus, MediaType } from "@/lib/mediaRegistry";
 import type { SafetyRulesModuleConfig } from "@/lib/safetyRulesConfig";
 
@@ -52,6 +53,7 @@ export interface HseSafetyRulesReport {
     recommendation: string;
     metric?: string;
   }>;
+  analysisFindings: AnalysisFinding[];
   summary: {
     riskLevel: HseRiskLevel;
     openFindingCount: number;

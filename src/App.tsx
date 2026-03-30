@@ -11,6 +11,7 @@ import NotFound from "./pages/NotFound";
 import OutputData from "./pages/OutputData";
 import NoHelmetAnalysis from "./pages/NoHelmetAnalysis";
 import AnalysisSetup from "./pages/AnalysisSetup";
+import RunAnalysis from "./pages/RunAnalysis";
 import NoHelmetSetup from "./pages/NoHelmetSetup";
 import NoSafetyVestSetup from "./pages/NoSafetyVestSetup";
 import SafetyRulesSetup from "./pages/SafetyRulesSetup";
@@ -31,6 +32,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/output-data" element={<OutputData />} />
             <Route path="/analysis-setup" element={<AnalysisSetup />} />
+            <Route path="/run-analysis" element={<RunAnalysis />} />
             <Route path="/no-helmet-setup" element={<NoHelmetSetup />} />
             <Route path="/no-safety-vest-setup" element={<NoSafetyVestSetup />} />
             <Route path="/safety-rules-setup" element={<SafetyRulesSetup />} />
