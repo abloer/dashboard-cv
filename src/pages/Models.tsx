@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
   AlertTriangle,
   Boxes,
@@ -22,17 +23,23 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import {
+  createModelBenchmark,
   createModelDataset,
   createModelEvaluation,
   createModelTrainingJob,
+  getModelBenchmarks,
   getModelDatasets,
   getModelEvaluations,
   getModelsOverview,
   getModelTrainingJobs,
   getModelVersions,
+  type CreateModelBenchmarkPayload,
   type CreateModelDatasetPayload,
   type CreateModelEvaluationPayload,
   type CreateModelTrainingJobPayload,
+  type ModelBenchmark,
+  type ModelBenchmarkRecommendation,
+  type ModelBenchmarkStatus,
   type ModelDataset,
   type ModelDatasetDomain,
   type ModelEvaluation,
@@ -44,6 +51,7 @@ import {
   type ModelTrainingJobStatus,
   type ModelVersion,
   type ModelsOverview,
+  updateModelBenchmark,
   updateModelDataset,
   updateModelEvaluation,
   updateModelTrainingJob,
@@ -72,7 +80,11 @@ const sourceTypeLabelMap: Record<ModelDatasetSourceType, string> = {
 const moduleLabelMap: Record<ModelTargetModule, string> = {
   "ppe.no-helmet": "PPE • No Helmet",
   "ppe.no-safety-vest": "PPE • No Safety Vest",
+  "ppe.no-life-vest": "PPE • No Life Vest",
   "hse.safety-rules": "HSE • Safety Rules",
+  "hse.working-at-height": "HSE • Working at Height",
+  "operations.red-light-violation": "Operations • Red Light Violation",
+  "operations.dump-truck-bed-open": "Operations • Dump Truck Bed Open",
 };
 
 const trainingJobStatusLabelMap: Record<ModelTrainingJobStatus, string> = {
@@ -87,6 +99,18 @@ const evaluationStatusLabelMap: Record<ModelEvaluationStatus, string> = {
   reviewed: "Reviewed",
   approved: "Approved",
   rejected: "Rejected",
+};
+
+const benchmarkStatusLabelMap: Record<ModelBenchmarkStatus, string> = {
+  draft: "Draft",
+  reviewed: "Reviewed",
+  approved: "Approved",
+};
+
+const benchmarkRecommendationLabelMap: Record<ModelBenchmarkRecommendation, string> = {
+  "keep-current": "Keep Current",
+  "replace-model": "Replace Model",
+  "fine-tune": "Fine-Tune",
 };
 
 const modelVersionStatusLabelMap = {
@@ -121,6 +145,14 @@ const datasetTemplateByModule: Record<
       "Fine-tune model vest khusus dengan fokus pada positive safety-vest, worker kecil/jauh, occlusion, dan variasi warna background proyek.",
     imageSize: 1280,
   },
+  "ppe.no-life-vest": {
+    labels: ["person", "life-vest"],
+    description:
+      "Disarankan mulai dari model positive life vest: person + life-vest. Cocok untuk area air, dermaga, atau ponton sebelum rule engine menghitung missing life vest.",
+    notes:
+      "Fine-tune model life vest untuk area dekat air, refleksi cahaya, dan pekerja/crew dengan pelampung berwarna terang.",
+    imageSize: 1280,
+  },
   "hse.safety-rules": {
     labels: ["person", "vehicle", "hardhat", "safety-vest"],
     description:
@@ -129,11 +161,36 @@ const datasetTemplateByModule: Record<
       "Siapkan baseline detector HSE untuk person, vehicle, hardhat, dan safety-vest sebagai input rule engine.",
     imageSize: 1280,
   },
+  "hse.working-at-height": {
+    labels: ["person"],
+    description:
+      "Dataset working at height cukup dimulai dari person di area elevasi, platform, atau scaffold. Zone dan aturan ketinggian akan ditangani oleh rule engine.",
+    notes:
+      "Gunakan dataset person di area tinggi untuk baseline deteksi presence sebelum ditambah rule elevasi dan PPE wajib di ketinggian.",
+    imageSize: 1280,
+  },
+  "operations.red-light-violation": {
+    labels: ["vehicle", "red-light", "green-light"],
+    description:
+      "Siapkan dataset kendaraan, lampu merah, dan lampu hijau pada persimpangan tambang. Frame harus memperlihatkan stop line dan status lampu dengan jelas.",
+    notes:
+      "Bandingkan model kandidat lampu lalu lintas tambang terhadap baseline aktif untuk kasus kendaraan melintasi stop line saat merah.",
+    imageSize: 1280,
+  },
+  "operations.dump-truck-bed-open": {
+    labels: ["dump-truck", "bed-open", "bed-closed"],
+    description:
+      "Dataset ini fokus pada dump truck dengan variasi sudut bak terbuka dan tertutup. Ambil contoh truck diam, bergerak, jauh, dan dekat agar rule bed-open saat berjalan bisa dilatih stabil.",
+    notes:
+      "Fine-tune model dump truck khusus area hauling agar state bak terbuka/tertutup lebih konsisten pada kamera tambang.",
+    imageSize: 1280,
+  },
 };
 
 const domainBadgeClassMap: Record<ModelDatasetDomain, string> = {
   PPE: "bg-primary/10 text-primary border-primary/30",
   HSE: "bg-accent/10 text-accent border-accent/30",
+  Operations: "bg-amber-500/10 text-amber-300 border-amber-500/30",
 };
 
 const emptyOverview: ModelsOverview = {
@@ -149,6 +206,7 @@ const emptyOverview: ModelsOverview = {
   domainSplit: {
     PPE: 0,
     HSE: 0,
+    Operations: 0,
   },
   activeModelsByModule: [],
   latestDatasetAt: null,
@@ -186,10 +244,23 @@ const initialEvaluationDraft: CreateModelEvaluationPayload = {
   benchmarkNotes: "",
 };
 
+const initialBenchmarkDraft: CreateModelBenchmarkPayload = {
+  datasetId: "",
+  modelVersionId: "",
+  baselineModelPath: "",
+  recommendation: "keep-current",
+  status: "draft",
+  precisionDelta: null,
+  recallDelta: null,
+  falsePositiveDelta: null,
+  falseNegativeDelta: null,
+  benchmarkNotes: "",
+};
+
 const overviewSections = [
   {
     title: "Dataset Registry",
-    description: "Daftar dataset lapangan untuk PPE/HSE, lengkap dengan domain, label, dan status kesiapan anotasi.",
+    description: "Daftar dataset lapangan untuk PPE, HSE, atau Operations, lengkap dengan domain, label, dan status kesiapan anotasi.",
     icon: Database,
   },
   {
@@ -209,28 +280,148 @@ const overviewSections = [
   },
 ] as const;
 
+const modelStepNavigation = [
+  {
+    key: "overview",
+    href: "/models",
+    title: "Overview",
+    description: "Ringkasan lifecycle model dan langkah berikutnya.",
+  },
+  {
+    key: "datasets",
+    href: "/models/datasets",
+    title: "1. Dataset",
+    description: "Daftarkan dan siapkan dataset sampai status ready.",
+  },
+  {
+    key: "training",
+    href: "/models/training-jobs",
+    title: "2. Training",
+    description: "Buat training job dari dataset ready.",
+  },
+  {
+    key: "evaluation",
+    href: "/models/evaluation",
+    title: "3. Evaluation",
+    description: "Catat precision, recall, dan false positive/negative.",
+  },
+  {
+    key: "benchmarks",
+    href: "/models/benchmarks",
+    title: "4. Benchmark",
+    description: "Bandingkan kandidat model dengan baseline aktif.",
+  },
+  {
+    key: "deployment",
+    href: "/models/deployment-gate",
+    title: "5. Deployment",
+    description: "Approve, reject, atau aktifkan model kandidat.",
+  },
+] as const;
+
+const modelViewHeader = {
+  overview: {
+    title: "Models",
+    subtitle:
+      "Lifecycle model dipisahkan dari Analysis Modules agar dataset, training, evaluasi, benchmark, dan deployment gate bisa dijalankan step-by-step.",
+  },
+  datasets: {
+    title: "Dataset Registry",
+    subtitle: "Langkah 1. Daftarkan dataset lapangan dan tandai yang sudah siap ke status ready sebelum training dimulai.",
+  },
+  training: {
+    title: "Training Jobs",
+    subtitle: "Langkah 2. Buat training job dari dataset ready untuk menghasilkan model kandidat baru.",
+  },
+  evaluation: {
+    title: "Evaluation",
+    subtitle: "Langkah 3. Catat precision, recall, mAP, dan catatan false positive/negative untuk kandidat model.",
+  },
+  benchmarks: {
+    title: "Benchmark",
+    subtitle: "Langkah 4. Bandingkan model kandidat terhadap baseline aktif dan putuskan keep current, replace model, atau fine-tune.",
+  },
+  deployment: {
+    title: "Deployment Gate",
+    subtitle: "Langkah 5. Approve, reject, atau set active model yang sudah lolos review lapangan.",
+  },
+} as const;
+
+const datasetDomainHelpText: Record<ModelDatasetDomain, string> = {
+  PPE: "Pakai domain PPE jika dataset ini dipakai untuk mendeteksi helm, safety vest, atau APD pekerja.",
+  HSE: "Pakai domain HSE jika dataset ini dipakai sebagai input aturan keselamatan yang lebih luas, misalnya person, vehicle, hardhat, dan safety-vest.",
+  Operations:
+    "Pakai domain Operations jika dataset dipakai untuk keselamatan kendaraan, lampu merah di persimpangan, atau kondisi dump truck saat berjalan.",
+};
+
+const datasetSourceTypeHelpText: Record<ModelDatasetSourceType, string> = {
+  upload: "Pilih Upload jika gambar/frame dikumpulkan dari video yang di-upload manual.",
+  camera: "Pilih Camera jika data berasal dari kamera tetap atau stream monitoring.",
+  mixed: "Pilih Mixed jika dataset menggabungkan upload manual dan capture dari camera.",
+};
+
+const datasetStatusHelpText: Record<ModelDatasetStatus, string> = {
+  draft: "Gunakan Draft jika dataset masih dikumpulkan atau anotasinya belum selesai.",
+  ready: "Gunakan Ready jika dataset sudah siap dipakai untuk training atau benchmark.",
+  archived: "Gunakan Archived jika dataset disimpan sebagai arsip dan tidak dipakai aktif.",
+};
+
 export default function Models() {
   const { toast } = useToast();
+  const location = useLocation();
   const [overview, setOverview] = useState<ModelsOverview>(emptyOverview);
   const [datasets, setDatasets] = useState<ModelDataset[]>([]);
   const [trainingJobs, setTrainingJobs] = useState<ModelTrainingJob[]>([]);
   const [modelVersions, setModelVersions] = useState<ModelVersion[]>([]);
   const [evaluations, setEvaluations] = useState<ModelEvaluation[]>([]);
+  const [benchmarks, setBenchmarks] = useState<ModelBenchmark[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTrainingJobSubmitting, setIsTrainingJobSubmitting] = useState(false);
   const [isEvaluationSubmitting, setIsEvaluationSubmitting] = useState(false);
+  const [isBenchmarkSubmitting, setIsBenchmarkSubmitting] = useState(false);
   const [isDeploymentSubmittingId, setIsDeploymentSubmittingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [datasetDraft, setDatasetDraft] = useState<CreateModelDatasetPayload>(initialDraft);
   const [trainingJobDraft, setTrainingJobDraft] = useState<CreateModelTrainingJobPayload>(initialTrainingJobDraft);
   const [evaluationDraft, setEvaluationDraft] = useState<CreateModelEvaluationPayload>(initialEvaluationDraft);
+  const [benchmarkDraft, setBenchmarkDraft] = useState<CreateModelBenchmarkPayload>(initialBenchmarkDraft);
   const [trainingJobEdits, setTrainingJobEdits] = useState<
     Record<string, { status: ModelTrainingJobStatus; outputModelPath: string; notes: string }>
   >({});
   const [evaluationEdits, setEvaluationEdits] = useState<
     Record<string, { status: ModelEvaluationStatus; benchmarkNotes: string }>
   >({});
+  const [benchmarkEdits, setBenchmarkEdits] = useState<
+    Record<
+      string,
+      {
+        status: ModelBenchmarkStatus;
+        recommendation: ModelBenchmarkRecommendation;
+        benchmarkNotes: string;
+      }
+    >
+  >({});
+
+  const modelsView = useMemo(() => {
+    if (location.pathname === "/models/datasets") return "datasets";
+    if (location.pathname === "/models/training-jobs") return "training";
+    if (location.pathname === "/models/evaluation") return "evaluation";
+    if (location.pathname === "/models/benchmarks") return "benchmarks";
+    if (location.pathname === "/models/deployment-gate") return "deployment";
+    return "overview";
+  }, [location.pathname]);
+  const headerCopy = modelViewHeader[modelsView];
+  const datasetStoragePathPlaceholder =
+    datasetDraft.domain === "HSE"
+      ? "/datasets/hse/site-safety-batch-01"
+      : "/datasets/ppe/outdoor-batch-01";
+  const datasetLabelPlaceholder =
+    datasetDraft.domain === "HSE" ? "person, vehicle, hardhat, safety-vest" : "person, hardhat";
+  const datasetDescriptionPlaceholder =
+    datasetDraft.domain === "HSE"
+      ? "Kumpulan frame area kerja untuk rule keselamatan umum, misalnya person, vehicle, hardhat, dan safety-vest."
+      : "Kumpulan frame pekerja proyek dengan variasi jarak, occlusion, dan background alat berat.";
 
   const sortedDatasets = useMemo(
     () =>
@@ -264,6 +455,14 @@ export default function Models() {
     [evaluations]
   );
 
+  const sortedBenchmarks = useMemo(
+    () =>
+      [...benchmarks].sort(
+        (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+      ),
+    [benchmarks]
+  );
+
   const readyDatasets = useMemo(
     () => sortedDatasets.filter((item) => item.status === "ready"),
     [sortedDatasets]
@@ -272,31 +471,45 @@ export default function Models() {
   const selectedTrainingDataset =
     readyDatasets.find((item) => item.id === trainingJobDraft.datasetId) || null;
 
+  const benchmarkCandidateVersions = useMemo(
+    () => sortedModelVersions.filter((item) => item.status === "candidate" || item.status === "approved"),
+    [sortedModelVersions]
+  );
+
+  const selectedBenchmarkModel =
+    benchmarkCandidateVersions.find((item) => item.id === benchmarkDraft.modelVersionId) || null;
+
   const selectableModules: ModelTargetModule[] = useMemo(() => {
     if (!selectedTrainingDataset) {
       return [];
     }
-    return selectedTrainingDataset.domain === "PPE"
-      ? ["ppe.no-helmet", "ppe.no-safety-vest"]
-      : ["hse.safety-rules"];
+    if (selectedTrainingDataset.domain === "PPE") {
+      return ["ppe.no-helmet", "ppe.no-safety-vest", "ppe.no-life-vest"];
+    }
+    if (selectedTrainingDataset.domain === "HSE") {
+      return ["hse.safety-rules", "hse.working-at-height"];
+    }
+    return ["operations.red-light-violation", "operations.dump-truck-bed-open"];
   }, [selectedTrainingDataset]);
 
   const loadModelsState = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      const [overviewData, datasetItems, trainingJobItems, modelVersionItems, evaluationItems] = await Promise.all([
+      const [overviewData, datasetItems, trainingJobItems, modelVersionItems, evaluationItems, benchmarkItems] = await Promise.all([
         getModelsOverview(),
         getModelDatasets(),
         getModelTrainingJobs(),
         getModelVersions(),
         getModelEvaluations(),
+        getModelBenchmarks(),
       ]);
       setOverview(overviewData);
       setDatasets(datasetItems);
       setTrainingJobs(trainingJobItems);
       setModelVersions(modelVersionItems);
       setEvaluations(evaluationItems);
+      setBenchmarks(benchmarkItems);
       setTrainingJobEdits(
         Object.fromEntries(
           trainingJobItems.map((item) => [
@@ -315,6 +528,18 @@ export default function Models() {
             item.id,
             {
               status: item.status,
+              benchmarkNotes: item.benchmarkNotes,
+            },
+          ])
+        )
+      );
+      setBenchmarkEdits(
+        Object.fromEntries(
+          benchmarkItems.map((item) => [
+            item.id,
+            {
+              status: item.status,
+              recommendation: item.recommendation,
               benchmarkNotes: item.benchmarkNotes,
             },
           ])
@@ -349,10 +574,15 @@ export default function Models() {
       const nextDataset = readyDatasets.find((item) => item.id === nextDatasetId) || readyDatasets[0];
       const nextTargetModule =
         nextDataset.domain === "PPE"
-          ? current.targetModule === "hse.safety-rules"
+          ? current.targetModule === "hse.safety-rules" ||
+            current.targetModule === "hse.working-at-height" ||
+            current.targetModule === "operations.red-light-violation" ||
+            current.targetModule === "operations.dump-truck-bed-open"
             ? "ppe.no-helmet"
             : current.targetModule
-          : "hse.safety-rules";
+          : nextDataset.domain === "HSE"
+            ? "hse.safety-rules"
+            : "operations.red-light-violation";
       const preferredActiveModel = overview.activeModelsByModule.find(
         (item) => item.moduleKey === nextTargetModule
       );
@@ -384,8 +614,39 @@ export default function Models() {
         sortedModelVersions.some((item) => item.id === current.modelVersionId)
           ? current.modelVersionId
           : sortedModelVersions[0].id,
-    }));
+      }));
   }, [sortedModelVersions]);
+
+  useEffect(() => {
+    if (benchmarkCandidateVersions.length === 0) {
+      setBenchmarkDraft((current) => ({
+        ...current,
+        modelVersionId: "",
+      }));
+      return;
+    }
+
+    setBenchmarkDraft((current) => {
+      const nextModelVersionId = benchmarkCandidateVersions.some((item) => item.id === current.modelVersionId)
+        ? current.modelVersionId
+        : benchmarkCandidateVersions[0].id;
+      const nextModel = benchmarkCandidateVersions.find((item) => item.id === nextModelVersionId) || benchmarkCandidateVersions[0];
+      const matchingReadyDataset =
+        readyDatasets.find((item) => item.domain === nextModel.domain) || readyDatasets[0] || null;
+      const preferredBaseline =
+        overview.activeModelsByModule.find((item) => item.moduleKey === nextModel.moduleKey)?.modelPath || "";
+
+      return {
+        ...current,
+        modelVersionId: nextModelVersionId,
+        datasetId:
+          matchingReadyDataset && (!current.datasetId || !readyDatasets.some((item) => item.id === current.datasetId))
+            ? matchingReadyDataset.id
+            : current.datasetId,
+        baselineModelPath: current.baselineModelPath || preferredBaseline,
+      };
+    });
+  }, [benchmarkCandidateVersions, overview.activeModelsByModule, readyDatasets]);
 
   const handleDatasetDraftChange = <K extends keyof CreateModelDatasetPayload>(
     key: K,
@@ -425,6 +686,16 @@ export default function Models() {
     }));
   };
 
+  const handleBenchmarkDraftChange = <K extends keyof CreateModelBenchmarkPayload>(
+    key: K,
+    value: CreateModelBenchmarkPayload[K]
+  ) => {
+    setBenchmarkDraft((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  };
+
   const handleTrainingDatasetChange = (datasetId: string) => {
     const dataset = readyDatasets.find((item) => item.id === datasetId);
     if (!dataset) {
@@ -434,7 +705,9 @@ export default function Models() {
     const nextTargetModule =
       dataset.domain === "PPE"
         ? "ppe.no-helmet"
-        : "hse.safety-rules";
+        : dataset.domain === "HSE"
+          ? "hse.safety-rules"
+          : "operations.red-light-violation";
     const preferredActiveModel = overview.activeModelsByModule.find(
       (item) => item.moduleKey === nextTargetModule
     );
@@ -464,11 +737,35 @@ export default function Models() {
     }));
   };
 
+  const handleBenchmarkModelChange = (modelVersionId: string) => {
+    const modelVersion = benchmarkCandidateVersions.find((item) => item.id === modelVersionId);
+    if (!modelVersion) {
+      return;
+    }
+
+    const matchingReadyDataset =
+      readyDatasets.find((item) => item.domain === modelVersion.domain) || readyDatasets[0] || null;
+    const preferredBaseline =
+      overview.activeModelsByModule.find((item) => item.moduleKey === modelVersion.moduleKey)?.modelPath || "";
+
+    setBenchmarkDraft((current) => ({
+      ...current,
+      modelVersionId,
+      datasetId: matchingReadyDataset?.id || current.datasetId,
+      baselineModelPath: preferredBaseline || current.baselineModelPath,
+    }));
+  };
+
   const applyDatasetTemplate = (targetModule: ModelTargetModule) => {
     const template = datasetTemplateByModule[targetModule];
     setDatasetDraft((current) => ({
       ...current,
-      domain: targetModule === "hse.safety-rules" ? "HSE" : "PPE",
+      domain:
+        targetModule === "hse.safety-rules" || targetModule === "hse.working-at-height"
+          ? "HSE"
+          : targetModule === "operations.red-light-violation" || targetModule === "operations.dump-truck-bed-open"
+            ? "Operations"
+            : "PPE",
       labels: template.labels,
       description: current.description || template.description,
     }));
@@ -740,6 +1037,112 @@ export default function Models() {
     }
   };
 
+  const handleCreateBenchmark = async () => {
+    if (!benchmarkDraft.datasetId || !benchmarkDraft.modelVersionId || !benchmarkDraft.baselineModelPath.trim()) {
+      toast({
+        title: "Benchmark belum lengkap",
+        description: "Pilih dataset, kandidat model, dan baseline model path sebelum membuat benchmark.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsBenchmarkSubmitting(true);
+    try {
+      const response = await createModelBenchmark({
+        ...benchmarkDraft,
+        baselineModelPath: benchmarkDraft.baselineModelPath.trim(),
+        benchmarkNotes: benchmarkDraft.benchmarkNotes.trim(),
+      });
+      setBenchmarks((current) => [response.item, ...current]);
+      setBenchmarkEdits((current) => ({
+        ...current,
+        [response.item.id]: {
+          status: response.item.status,
+          recommendation: response.item.recommendation,
+          benchmarkNotes: response.item.benchmarkNotes,
+        },
+      }));
+      setOverview(response.overview);
+      setBenchmarkDraft((current) => ({
+        ...initialBenchmarkDraft,
+        modelVersionId: current.modelVersionId,
+        datasetId: current.datasetId,
+        baselineModelPath: current.baselineModelPath,
+      }));
+      toast({
+        title: "Benchmark record dibuat",
+        description: `${response.item.modelName} sekarang punya catatan keputusan awal ${benchmarkRecommendationLabelMap[response.item.recommendation]}.`,
+      });
+    } catch (submitError) {
+      toast({
+        title: "Gagal membuat benchmark",
+        description:
+          submitError instanceof Error ? submitError.message : "Terjadi error saat membuat benchmark record.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsBenchmarkSubmitting(false);
+    }
+  };
+
+  const handleBenchmarkEditChange = (
+    benchmarkId: string,
+    patch: Partial<{
+      status: ModelBenchmarkStatus;
+      recommendation: ModelBenchmarkRecommendation;
+      benchmarkNotes: string;
+    }>
+  ) => {
+    setBenchmarkEdits((current) => ({
+      ...current,
+      [benchmarkId]: {
+        status: current[benchmarkId]?.status || "draft",
+        recommendation: current[benchmarkId]?.recommendation || "keep-current",
+        benchmarkNotes: current[benchmarkId]?.benchmarkNotes || "",
+        ...patch,
+      },
+    }));
+  };
+
+  const handleSaveBenchmark = async (benchmarkId: string) => {
+    const draft = benchmarkEdits[benchmarkId];
+    if (!draft) {
+      return;
+    }
+
+    try {
+      const response = await updateModelBenchmark(benchmarkId, {
+        status: draft.status,
+        recommendation: draft.recommendation,
+        benchmarkNotes: draft.benchmarkNotes,
+      });
+      setBenchmarks((current) =>
+        current.map((item) => (item.id === benchmarkId ? response.item : item))
+      );
+      setOverview(response.overview);
+      setBenchmarkEdits((current) => ({
+        ...current,
+        [benchmarkId]: {
+          status: response.item.status,
+          recommendation: response.item.recommendation,
+          benchmarkNotes: response.item.benchmarkNotes,
+        },
+      }));
+      toast({
+        title: "Benchmark diperbarui",
+        description: `${response.item.modelName} sekarang ditandai ${benchmarkRecommendationLabelMap[response.item.recommendation]}.`,
+      });
+    } catch (updateError) {
+      toast({
+        title: "Gagal memperbarui benchmark",
+        description:
+          updateError instanceof Error ? updateError.message : "Terjadi error saat memperbarui benchmark.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const refreshModelVersionsOnly = async () => {
     const [modelVersionItems, evaluationItems] = await Promise.all([
       getModelVersions(),
@@ -777,9 +1180,37 @@ export default function Models() {
   return (
     <DashboardLayout>
       <Header
-        title="Models"
-        subtitle="Lifecycle model dipisahkan dari Analysis Modules agar dataset, training, evaluasi, dan deployment gate tetap rapi dan bisa di-review lintas tim."
+        title={headerCopy.title}
+        subtitle={headerCopy.subtitle}
       />
+
+      <Card className="mb-6 border-border/60">
+        <CardHeader>
+          <CardTitle>Workflow Models</CardTitle>
+          <CardDescription>
+            Gunakan alur ini secara berurutan: dataset → training → evaluation → benchmark → deployment. Anda masih bisa lompat ke langkah tertentu, tapi keputusan model aktif idealnya selalu melewati urutan ini.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          {modelStepNavigation.map((step) => {
+            const isActive = modelsView === step.key;
+            return (
+              <Link
+                key={step.key}
+                to={step.href}
+                className={`rounded-2xl border p-4 transition-colors ${
+                  isActive
+                    ? "border-primary/40 bg-primary/10"
+                    : "border-border/70 bg-secondary/10 hover:bg-secondary/20"
+                }`}
+              >
+                <p className="mb-1 text-sm font-medium text-foreground">{step.title}</p>
+                <p className="text-xs text-muted-foreground">{step.description}</p>
+              </Link>
+            );
+          })}
+        </CardContent>
+      </Card>
 
       {error && (
         <Card className="mb-6 border-destructive/40">
@@ -790,6 +1221,8 @@ export default function Models() {
         </Card>
       )}
 
+      {modelsView === "overview" && (
+        <>
       <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card className="border-border/60">
           <CardHeader className="pb-2">
@@ -828,11 +1261,13 @@ export default function Models() {
           <CardHeader className="pb-2">
             <CardDescription>Domain Split</CardDescription>
             <CardTitle className="text-3xl">
-              {isLoading ? "..." : `${overview.domainSplit.PPE}/${overview.domainSplit.HSE}`}
+              {isLoading ? "..." : `${overview.domainSplit.PPE}/${overview.domainSplit.HSE}/${overview.domainSplit.Operations}`}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            {isLoading ? "Menghitung distribusi domain..." : `PPE ${overview.domainSplit.PPE} dataset • HSE ${overview.domainSplit.HSE} dataset.`}
+            {isLoading
+              ? "Menghitung distribusi domain..."
+              : `PPE ${overview.domainSplit.PPE} dataset • HSE ${overview.domainSplit.HSE} dataset • Operations ${overview.domainSplit.Operations} dataset.`}
           </CardContent>
         </Card>
       </div>
@@ -908,16 +1343,30 @@ export default function Models() {
           </CardContent>
         </Card>
       </div>
+        </>
+      )}
 
+      {modelsView === "datasets" && (
       <div className="mb-6 grid gap-6 xl:grid-cols-[0.85fr,1.15fr]">
         <Card className="border-border/60">
           <CardHeader>
             <CardTitle>Buat Dataset Baru</CardTitle>
             <CardDescription>
-              Pakai registry ini untuk mencatat dataset lapangan, label target, dan path storage sebelum masuk tahap anotasi/training.
+              Form ini dipakai untuk mencatat dataset secara administratif dulu. Anda belum perlu melatih model di tahap ini, cukup isi identitas dataset, isi label target, dan folder penyimpanannya.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-4">
+              <p className="text-sm font-medium text-foreground">Cara isi cepat</p>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <p><span className="font-medium text-foreground">1. Nama Dataset:</span> isi nama yang mudah dikenali, misalnya area, jenis data, dan batch.</p>
+                <p><span className="font-medium text-foreground">2. Domain:</span> pilih apakah dataset ini untuk PPE, HSE, atau Operations.</p>
+                <p><span className="font-medium text-foreground">3. Labels:</span> isi objek apa saja yang ingin dikenali model, dipisahkan koma.</p>
+                <p><span className="font-medium text-foreground">4. Jumlah Image/Annotation:</span> isi perkiraan awal. Boleh `0` jika masih tahap pendataan.</p>
+                <p><span className="font-medium text-foreground">5. Storage Path:</span> isi folder tempat dataset ini akan disimpan atau sudah disimpan.</p>
+                <p><span className="font-medium text-foreground">6. Status:</span> mulai dari `Draft`, lalu ubah ke `Ready` setelah dataset benar-benar siap.</p>
+              </div>
+            </div>
             <div className="rounded-lg border border-border/70 bg-secondary/10 p-4 space-y-3">
               <p className="text-sm font-medium text-foreground">Template Dataset Cepat</p>
               <div className="flex flex-wrap gap-2">
@@ -927,13 +1376,34 @@ export default function Models() {
                 <Button type="button" variant="outline" size="sm" onClick={() => applyDatasetTemplate("ppe.no-safety-vest")}>
                   PPE • No Safety Vest
                 </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => applyDatasetTemplate("ppe.no-life-vest")}>
+                  PPE • No Life Vest
+                </Button>
                 <Button type="button" variant="outline" size="sm" onClick={() => applyDatasetTemplate("hse.safety-rules")}>
                   HSE • Safety Rules
                 </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => applyDatasetTemplate("hse.working-at-height")}>
+                  HSE • Working at Height
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => applyDatasetTemplate("operations.red-light-violation")}>
+                  Operations • Red Light
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => applyDatasetTemplate("operations.dump-truck-bed-open")}>
+                  Operations • Dump Truck
+                </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Untuk vest, arah yang disarankan adalah dataset <code>person, safety-vest</code> agar model fokus pada positive vest lebih dulu sebelum rule engine menghitung missing vest.
+                Untuk vest, arah yang disarankan adalah dataset <code>person, safety-vest</code> atau <code>person, life-vest</code> agar model fokus pada positive PPE lebih dulu sebelum rule engine menghitung missing PPE. Untuk Operations, gunakan label yang langsung merepresentasikan kendaraan, lampu, atau state bak.
               </p>
+            </div>
+            <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+              <p className="text-sm font-medium text-foreground">Ringkasan draft saat ini</p>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <p><span className="font-medium text-foreground">Domain:</span> {datasetDraft.domain}</p>
+                <p><span className="font-medium text-foreground">Source Type:</span> {sourceTypeLabelMap[datasetDraft.sourceType]}</p>
+                <p><span className="font-medium text-foreground">Labels:</span> {datasetDraft.labels.join(", ") || "--"}</p>
+                <p><span className="font-medium text-foreground">Status awal:</span> {statusLabelMap[datasetDraft.status]}</p>
+              </div>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Nama Dataset</label>
@@ -942,10 +1412,13 @@ export default function Models() {
                 onChange={(event) => handleDatasetDraftChange("name", event.target.value)}
                 placeholder="PPE Outdoor Area Batch 01"
               />
+              <p className="text-xs text-muted-foreground">
+                Contoh yang baik: <code>PPE Outdoor Area Batch 01</code>, <code>Vest Loading Point Batch A</code>, <code>HSE Workshop Camera Set 01</code>, atau <code>Operations Red Light Junction Batch 01</code>.
+              </p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Domain</label>
+                <label className="text-sm font-medium text-foreground">Domain Dataset</label>
                 <Select
                   value={datasetDraft.domain}
                   onValueChange={(value: ModelDatasetDomain) => handleDatasetDraftChange("domain", value)}
@@ -956,11 +1429,13 @@ export default function Models() {
                   <SelectContent>
                     <SelectItem value="PPE">PPE</SelectItem>
                     <SelectItem value="HSE">HSE</SelectItem>
+                    <SelectItem value="Operations">Operations</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">{datasetDomainHelpText[datasetDraft.domain]}</p>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Source Type</label>
+                <label className="text-sm font-medium text-foreground">Asal Data</label>
                 <Select
                   value={datasetDraft.sourceType}
                   onValueChange={(value: ModelDatasetSourceType) => handleDatasetDraftChange("sourceType", value)}
@@ -974,28 +1449,32 @@ export default function Models() {
                     <SelectItem value="mixed">Mixed</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">{datasetSourceTypeHelpText[datasetDraft.sourceType]}</p>
               </div>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Labels</label>
+              <label className="text-sm font-medium text-foreground">Labels / Objek yang Ingin Dikenali</label>
               <Input
                 value={datasetDraft.labels.join(", ")}
                 onChange={(event) => handleLabelsChange(event.target.value)}
-                placeholder="person, hardhat"
+                placeholder={datasetLabelPlaceholder}
               />
               <p className="text-xs text-muted-foreground">
-                Pisahkan label dengan koma. Untuk vest, mulailah dari <code>person, safety-vest</code> agar model tidak terlalu bergantung pada label negatif langsung.
+                Pisahkan dengan koma. Contoh: <code>person, hardhat</code> atau <code>person, safety-vest</code>. Mulai dari label positif dulu agar model lebih stabil.
               </p>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Jumlah Image</label>
+                <label className="text-sm font-medium text-foreground">Jumlah Image / Frame</label>
                 <Input
                   type="number"
                   min={0}
                   value={datasetDraft.imageCount}
                   onChange={(event) => handleDatasetDraftChange("imageCount", Number(event.target.value) || 0)}
                 />
+                <p className="text-xs text-muted-foreground">
+                  Isi jumlah gambar/frame yang ada saat ini. Jika belum dihitung, boleh isi <code>0</code> dulu.
+                </p>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Jumlah Annotation</label>
@@ -1007,27 +1486,36 @@ export default function Models() {
                     handleDatasetDraftChange("annotationCount", Number(event.target.value) || 0)
                   }
                 />
+                <p className="text-xs text-muted-foreground">
+                  Isi jumlah bounding box / anotasi yang sudah selesai dibuat. Jika belum anotasi, boleh isi <code>0</code>.
+                </p>
               </div>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Storage Path</label>
+              <label className="text-sm font-medium text-foreground">Storage Path / Folder Dataset</label>
               <Input
                 value={datasetDraft.storagePath}
                 onChange={(event) => handleDatasetDraftChange("storagePath", event.target.value)}
-                placeholder="/datasets/ppe/outdoor-batch-01"
+                placeholder={datasetStoragePathPlaceholder}
               />
+              <p className="text-xs text-muted-foreground">
+                Isi folder tempat dataset ini disimpan atau akan disimpan. Ini hanya catatan registry, bukan upload file langsung dari form ini.
+              </p>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Deskripsi</label>
+              <label className="text-sm font-medium text-foreground">Deskripsi Dataset</label>
               <Textarea
                 value={datasetDraft.description}
                 onChange={(event) => handleDatasetDraftChange("description", event.target.value)}
-                placeholder="Kumpulan frame pekerja proyek dengan variasi jarak, occlusion, dan background alat berat."
+                placeholder={datasetDescriptionPlaceholder}
                 rows={4}
               />
+              <p className="text-xs text-muted-foreground">
+                Jelaskan singkat isi dataset ini: area apa, kondisi kamera seperti apa, dan tantangan apa yang ingin ditangani model.
+              </p>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Status</label>
+              <label className="text-sm font-medium text-foreground">Status Dataset</label>
               <Select
                 value={datasetDraft.status}
                 onValueChange={(value: ModelDatasetStatus) => handleDatasetDraftChange("status", value)}
@@ -1038,10 +1526,11 @@ export default function Models() {
                 <SelectContent>
                   <SelectItem value="draft">Draft</SelectItem>
                   <SelectItem value="ready">Ready</SelectItem>
-                  <SelectItem value="archived">Archived</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                    <SelectItem value="archived">Archived</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">{datasetStatusHelpText[datasetDraft.status]}</p>
+              </div>
             <Button onClick={handleCreateDataset} disabled={isSubmitting} className="w-full gap-2">
               {isSubmitting ? (
                 <>
@@ -1150,24 +1639,45 @@ export default function Models() {
           </CardContent>
         </Card>
       </div>
+      )}
 
+      {modelsView === "training" && (
       <div className="grid gap-6 xl:grid-cols-[0.9fr,1.1fr]">
         <Card className="border-border/60">
           <CardHeader>
             <CardTitle>Buat Training Job</CardTitle>
             <CardDescription>
-              Tahap 1 ini mencatat job fine-tuning dari dataset `ready`. Saat job selesai dan output model diisi, kandidat model otomatis masuk ke registry.
+              Form ini dipakai untuk mencatat rencana training atau fine-tuning. Anda belum perlu menjalankan training otomatis dari sini, cukup tentukan dataset, modul target, dan model dasar yang akan dipakai.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-4">
+              <p className="text-sm font-medium text-foreground">Cara isi cepat</p>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <p><span className="font-medium text-foreground">1. Dataset Ready:</span> pilih dataset yang sudah siap dipakai training.</p>
+                <p><span className="font-medium text-foreground">2. Target Module:</span> pilih modul mana yang ingin ditingkatkan, misalnya helmet atau safety vest.</p>
+                <p><span className="font-medium text-foreground">3. Epochs dan Image Size:</span> isi parameter dasar training. Nilai bawaan sudah cukup untuk draft awal.</p>
+                <p><span className="font-medium text-foreground">4. Base Model Path:</span> isi model dasar yang akan dijadikan titik awal training.</p>
+                <p><span className="font-medium text-foreground">5. Catatan Job:</span> jelaskan tujuan training, misalnya fokus mengurangi false positive pada worker jauh.</p>
+              </div>
+            </div>
             <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-4 space-y-2">
               <p className="text-sm font-medium text-foreground">Playbook per Modul</p>
               <p className="text-xs text-muted-foreground">
                 {datasetTemplateByModule[trainingJobDraft.targetModule].description}
               </p>
             </div>
+            <div className="rounded-lg border border-border/70 bg-secondary/10 p-4">
+              <p className="text-sm font-medium text-foreground">Ringkasan draft training saat ini</p>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <p><span className="font-medium text-foreground">Dataset:</span> {selectedTrainingDataset?.name || "--"}</p>
+                <p><span className="font-medium text-foreground">Modul target:</span> {moduleLabelMap[trainingJobDraft.targetModule]}</p>
+                <p><span className="font-medium text-foreground">Base model:</span> {trainingJobDraft.baseModelPath || "--"}</p>
+                <p><span className="font-medium text-foreground">Config awal:</span> {trainingJobDraft.epochs} epoch • img {trainingJobDraft.imageSize}</p>
+              </div>
+            </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Dataset Ready</label>
+              <label className="text-sm font-medium text-foreground">Dataset Siap Training</label>
               <Select
                 value={trainingJobDraft.datasetId}
                 onValueChange={handleTrainingDatasetChange}
@@ -1189,10 +1699,15 @@ export default function Models() {
                   Belum ada dataset `ready`. Ubah status dataset di registry sebelum membuat training job.
                 </p>
               )}
+              {readyDatasets.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Pilih dataset yang sudah selesai didata dan siap dipakai untuk percobaan training.
+                </p>
+              )}
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Target Module</label>
+                <label className="text-sm font-medium text-foreground">Modul yang Ingin Ditingkatkan</label>
                 <Select
                   value={trainingJobDraft.targetModule}
                   onValueChange={(value: ModelTargetModule) => handleTrainingModuleChange(value)}
@@ -1209,9 +1724,12 @@ export default function Models() {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Modul ini menentukan jenis model yang akan dilatih, misalnya detector helmet atau detector safety vest.
+                </p>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Epochs</label>
+                <label className="text-sm font-medium text-foreground">Jumlah Epoch</label>
                 <Input
                   type="number"
                   min={1}
@@ -1220,11 +1738,14 @@ export default function Models() {
                     handleTrainingJobDraftChange("epochs", Number(event.target.value) || 1)
                   }
                 />
+                <p className="text-xs text-muted-foreground">
+                  Epoch adalah jumlah putaran training. Untuk draft awal, nilai bawaan sudah cukup.
+                </p>
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Image Size</label>
+                <label className="text-sm font-medium text-foreground">Ukuran Image Training</label>
                 <Input
                   type="number"
                   min={1}
@@ -1233,31 +1754,43 @@ export default function Models() {
                     handleTrainingJobDraftChange("imageSize", Number(event.target.value) || 1280)
                   }
                 />
+                <p className="text-xs text-muted-foreground">
+                  Isi ukuran gambar yang dipakai saat training. Semakin besar, detail lebih baik tapi training lebih berat.
+                </p>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Domain</label>
+                <label className="text-sm font-medium text-foreground">Domain Dataset</label>
                 <Input
                   value={selectedTrainingDataset?.domain || "--"}
                   readOnly
                 />
+                <p className="text-xs text-muted-foreground">
+                  Field ini otomatis mengikuti dataset yang dipilih.
+                </p>
               </div>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Base Model Path</label>
+              <label className="text-sm font-medium text-foreground">Base Model Path / Model Dasar</label>
               <Input
                 value={trainingJobDraft.baseModelPath}
                 onChange={(event) => handleTrainingJobDraftChange("baseModelPath", event.target.value)}
                 placeholder="/models/base-model.pt"
               />
+              <p className="text-xs text-muted-foreground">
+                Isi path model yang dijadikan titik awal. Biasanya pakai model aktif saat ini atau kandidat model sebelumnya.
+              </p>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Catatan Job</label>
+              <label className="text-sm font-medium text-foreground">Catatan Tujuan Training</label>
               <Textarea
                 value={trainingJobDraft.notes}
                 onChange={(event) => handleTrainingJobDraftChange("notes", event.target.value)}
                 placeholder="Contoh: fine-tune PPE outdoor area untuk pekerja jauh dan scene alat berat."
                 rows={4}
               />
+              <p className="text-xs text-muted-foreground">
+                Tulis singkat masalah yang ingin diperbaiki oleh training ini, misalnya false positive pada vest atau pekerja kecil di frame.
+              </p>
             </div>
             <Button
               onClick={handleCreateTrainingJob}
@@ -1398,18 +1931,30 @@ export default function Models() {
           </CardContent>
         </Card>
       </div>
+      )}
 
+      {modelsView === "evaluation" && (
       <div className="mt-6 grid gap-6 xl:grid-cols-[0.9fr,1.1fr]">
         <Card className="border-border/60">
           <CardHeader>
             <CardTitle>Buat Evaluation Record</CardTitle>
             <CardDescription>
-              Tahap 1 `Evaluation` dipakai untuk mencatat precision/recall/mAP dan catatan benchmark lapangan sebelum model kandidat lanjut ke deployment gate.
+              Form ini dipakai untuk mencatat hasil uji model kandidat. Tujuannya agar keputusan approve atau reject model punya catatan yang jelas.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-4">
+              <p className="text-sm font-medium text-foreground">Cara isi cepat</p>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <p><span className="font-medium text-foreground">1. Model Version:</span> pilih model kandidat yang baru selesai dibuat.</p>
+                <p><span className="font-medium text-foreground">2. Precision / Recall / mAP50:</span> isi hasil metrik uji jika sudah ada.</p>
+                <p><span className="font-medium text-foreground">3. False Positive / False Negative Notes:</span> catat kesalahan yang masih sering terjadi.</p>
+                <p><span className="font-medium text-foreground">4. Benchmark Notes:</span> jelaskan ringkasan uji lapangan atau scene yang dipakai membandingkan model.</p>
+                <p><span className="font-medium text-foreground">5. Status Evaluasi:</span> mulai dari `Draft`, lalu naikkan ke `Reviewed`, `Approved`, atau `Rejected`.</p>
+              </div>
+            </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Model Version</label>
+              <label className="text-sm font-medium text-foreground">Model Version yang Dievaluasi</label>
               <Select
                 value={evaluationDraft.modelVersionId}
                 onValueChange={(value) => handleEvaluationDraftChange("modelVersionId", value)}
@@ -1426,6 +1971,9 @@ export default function Models() {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Pilih model kandidat yang ingin diuji. Jika belum ada model kandidat, kembali dulu ke langkah `Training Jobs`.
+              </p>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
@@ -1443,6 +1991,7 @@ export default function Models() {
                     )
                   }
                 />
+                <p className="text-xs text-muted-foreground">Isi angka 0 sampai 1. Semakin tinggi, semakin sedikit prediksi positif yang salah.</p>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Recall</label>
@@ -1459,6 +2008,7 @@ export default function Models() {
                     )
                   }
                 />
+                <p className="text-xs text-muted-foreground">Isi angka 0 sampai 1. Semakin tinggi, semakin banyak objek target yang berhasil tertangkap.</p>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">mAP50</label>
@@ -1475,34 +2025,44 @@ export default function Models() {
                     )
                   }
                 />
+                <p className="text-xs text-muted-foreground">Isi jika Anda punya hasil evaluasi model formal. Jika belum, boleh dikosongkan dulu.</p>
               </div>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">False Positive Notes</label>
+              <label className="text-sm font-medium text-foreground">Catatan False Positive</label>
               <Textarea
                 value={evaluationDraft.falsePositiveNotes}
                 onChange={(event) => handleEvaluationDraftChange("falsePositiveNotes", event.target.value)}
                 rows={3}
                 placeholder="Contoh: masih salah membaca pekerja jauh di tepi frame sebagai no helmet."
               />
+              <p className="text-xs text-muted-foreground">
+                Isi contoh kasus saat model mendeteksi pelanggaran padahal sebenarnya aman.
+              </p>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">False Negative Notes</label>
+              <label className="text-sm font-medium text-foreground">Catatan False Negative</label>
               <Textarea
                 value={evaluationDraft.falseNegativeNotes}
                 onChange={(event) => handleEvaluationDraftChange("falseNegativeNotes", event.target.value)}
                 rows={3}
                 placeholder="Contoh: helm warna putih di area terang kadang tidak terdeteksi."
               />
+              <p className="text-xs text-muted-foreground">
+                Isi contoh kasus saat model gagal menangkap pelanggaran yang sebenarnya ada.
+              </p>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Benchmark Notes</label>
+              <label className="text-sm font-medium text-foreground">Ringkasan Uji Lapangan</label>
               <Textarea
                 value={evaluationDraft.benchmarkNotes}
                 onChange={(event) => handleEvaluationDraftChange("benchmarkNotes", event.target.value)}
                 rows={4}
                 placeholder="Ringkasan uji lapangan, kamera pembanding, dan catatan scene sulit."
               />
+              <p className="text-xs text-muted-foreground">
+                Tulis singkat kamera, video, atau scene apa yang dipakai untuk menilai model ini.
+              </p>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground">Status Evaluasi</label>
@@ -1520,6 +2080,9 @@ export default function Models() {
                   <SelectItem value="rejected">Rejected</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Gunakan `Draft` saat catatan masih awal. Gunakan `Approved` hanya jika hasil uji sudah cukup meyakinkan.
+              </p>
             </div>
             <Button
               onClick={handleCreateEvaluation}
@@ -1651,16 +2214,374 @@ export default function Models() {
           </CardContent>
         </Card>
       </div>
+      )}
 
+      {modelsView === "benchmarks" && (
+      <div className="mt-6 grid gap-6 xl:grid-cols-[0.9fr,1.1fr]">
+        <Card className="border-border/60">
+          <CardHeader>
+            <CardTitle>Buat Benchmark Compare</CardTitle>
+            <CardDescription>
+              Form ini dipakai untuk membandingkan model kandidat dengan model aktif sekarang. Dari sini Anda memutuskan apakah model baru cukup bagus untuk menggantikan baseline, atau masih perlu fine-tune lagi.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-4">
+              <p className="text-sm font-medium text-foreground">Cara isi cepat</p>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <p><span className="font-medium text-foreground">1. Kandidat Model:</span> pilih model baru yang ingin dibandingkan.</p>
+                <p><span className="font-medium text-foreground">2. Dataset Benchmark:</span> pilih dataset ready yang dipakai untuk perbandingan.</p>
+                <p><span className="font-medium text-foreground">3. Baseline Model Path:</span> isi model aktif yang dipakai sekarang.</p>
+                <p><span className="font-medium text-foreground">4. Delta Metrics:</span> isi selisih hasil model baru dibanding baseline.</p>
+                <p><span className="font-medium text-foreground">5. Rekomendasi:</span> pilih `Keep Current`, `Replace Model`, atau `Fine-Tune`.</p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4 text-xs text-muted-foreground">
+              Untuk `PPE • No Safety Vest`, benchmark ini dipakai membandingkan kandidat model terhadap baseline aktif pada dataset lapangan yang sama. Isi delta positif untuk metrik yang membaik, dan delta negatif untuk metrik yang menurun.
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Kandidat Model</label>
+              <Select
+                value={benchmarkDraft.modelVersionId}
+                onValueChange={handleBenchmarkModelChange}
+                disabled={benchmarkCandidateVersions.length === 0}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih model kandidat/approved" />
+                </SelectTrigger>
+                <SelectContent>
+                  {benchmarkCandidateVersions.map((version) => (
+                    <SelectItem key={version.id} value={version.id}>
+                      {version.name} • {moduleLabelMap[version.moduleKey]} • {version.status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Pilih model baru yang ingin Anda nilai apakah layak menggantikan model aktif.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Dataset Pembanding</label>
+              <Select
+                value={benchmarkDraft.datasetId}
+                onValueChange={(value) => handleBenchmarkDraftChange("datasetId", value)}
+                disabled={readyDatasets.length === 0}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih dataset ready" />
+                </SelectTrigger>
+                <SelectContent>
+                  {readyDatasets.map((dataset) => (
+                    <SelectItem key={dataset.id} value={dataset.id}>
+                      {dataset.name} • {dataset.domain}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Pilih dataset yang dipakai untuk membandingkan kandidat model dengan baseline pada kondisi yang sama.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Baseline Model Path / Model Aktif Saat Ini</label>
+              <Input
+                value={benchmarkDraft.baselineModelPath}
+                onChange={(event) => handleBenchmarkDraftChange("baselineModelPath", event.target.value)}
+                placeholder="/models/current-active.pt"
+              />
+              <p className="text-xs text-muted-foreground">
+                Isi path model aktif yang saat ini dipakai sistem, agar pembandingnya jelas.
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Precision Delta</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={benchmarkDraft.precisionDelta ?? ""}
+                  onChange={(event) =>
+                    handleBenchmarkDraftChange(
+                      "precisionDelta",
+                      event.target.value === "" ? null : Number(event.target.value)
+                    )
+                  }
+                />
+                <p className="text-xs text-muted-foreground">Isi selisih precision model baru terhadap baseline. Nilai positif berarti lebih baik.</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Recall Delta</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={benchmarkDraft.recallDelta ?? ""}
+                  onChange={(event) =>
+                    handleBenchmarkDraftChange(
+                      "recallDelta",
+                      event.target.value === "" ? null : Number(event.target.value)
+                    )
+                  }
+                />
+                <p className="text-xs text-muted-foreground">Isi selisih recall model baru terhadap baseline. Nilai positif berarti lebih baik.</p>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">False Positive Delta</label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={benchmarkDraft.falsePositiveDelta ?? ""}
+                  onChange={(event) =>
+                    handleBenchmarkDraftChange(
+                      "falsePositiveDelta",
+                      event.target.value === "" ? null : Number(event.target.value)
+                    )
+                  }
+                />
+                <p className="text-xs text-muted-foreground">Isi perubahan jumlah false positive. Nilai negatif berarti false positive berkurang.</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">False Negative Delta</label>
+                <Input
+                  type="number"
+                  step="1"
+                  value={benchmarkDraft.falseNegativeDelta ?? ""}
+                  onChange={(event) =>
+                    handleBenchmarkDraftChange(
+                      "falseNegativeDelta",
+                      event.target.value === "" ? null : Number(event.target.value)
+                    )
+                  }
+                />
+                <p className="text-xs text-muted-foreground">Isi perubahan jumlah false negative. Nilai negatif berarti false negative berkurang.</p>
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Rekomendasi</label>
+                <Select
+                  value={benchmarkDraft.recommendation}
+                  onValueChange={(value: ModelBenchmarkRecommendation) =>
+                    handleBenchmarkDraftChange("recommendation", value)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="keep-current">Keep Current</SelectItem>
+                    <SelectItem value="replace-model">Replace Model</SelectItem>
+                    <SelectItem value="fine-tune">Fine-Tune</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  `Keep Current` jika model baru belum cukup baik, `Replace Model` jika model baru jelas lebih baik, dan `Fine-Tune` jika keduanya masih belum memadai.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Status Benchmark</label>
+                <Select
+                  value={benchmarkDraft.status}
+                  onValueChange={(value: ModelBenchmarkStatus) =>
+                    handleBenchmarkDraftChange("status", value)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="reviewed">Reviewed</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Gunakan `Reviewed` jika hasilnya sudah dibahas, dan `Approved` jika keputusan benchmark sudah final.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Catatan Hasil Benchmark</label>
+              <Textarea
+                value={benchmarkDraft.benchmarkNotes}
+                onChange={(event) => handleBenchmarkDraftChange("benchmarkNotes", event.target.value)}
+                rows={4}
+                placeholder="Ringkas hasil perbandingan lapangan: model baru lebih baik di vest jauh, tapi masih lemah pada occlusion berat."
+              />
+              <p className="text-xs text-muted-foreground">
+                Tulis ringkasan sederhana agar keputusan benchmark bisa dipahami orang lain tanpa membaca semua metrik satu per satu.
+              </p>
+            </div>
+            <Button
+              onClick={handleCreateBenchmark}
+              disabled={isBenchmarkSubmitting || benchmarkCandidateVersions.length === 0}
+              className="w-full gap-2"
+            >
+              {isBenchmarkSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Menyimpan Benchmark...
+                </>
+              ) : (
+                <>
+                  <FlaskConical className="h-4 w-4" />
+                  Tambah Benchmark Record
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/60">
+          <CardHeader>
+            <CardTitle>Benchmark Registry</CardTitle>
+            <CardDescription>
+              Registry keputusan pembanding model terhadap baseline aktif. Gunakan ini untuk memutuskan apakah modul vest cukup di-upgrade dengan ganti model, atau perlu fine-tune lanjutan.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Model / Dataset</TableHead>
+                  <TableHead>Delta</TableHead>
+                  <TableHead>Recommendation</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Notes</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-24 text-center">
+                      <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Memuat benchmark registry...
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : sortedBenchmarks.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                      Belum ada benchmark record. Tambahkan benchmark pertama untuk membandingkan kandidat model terhadap baseline aktif.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  sortedBenchmarks.map((benchmark) => {
+                    const draft = benchmarkEdits[benchmark.id] || {
+                      status: benchmark.status,
+                      recommendation: benchmark.recommendation,
+                      benchmarkNotes: benchmark.benchmarkNotes,
+                    };
+
+                    return (
+                      <TableRow key={benchmark.id}>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <p className="font-medium text-foreground">{benchmark.modelName}</p>
+                            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                              <Badge className={domainBadgeClassMap[benchmark.domain]}>{benchmark.domain}</Badge>
+                              <span>{moduleLabelMap[benchmark.moduleKey]}</span>
+                              <span>{benchmark.datasetName}</span>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1 text-sm text-muted-foreground">
+                            <p>ΔP {typeof benchmark.precisionDelta === "number" ? benchmark.precisionDelta.toFixed(2) : "--"}</p>
+                            <p>ΔR {typeof benchmark.recallDelta === "number" ? benchmark.recallDelta.toFixed(2) : "--"}</p>
+                            <p>FP {typeof benchmark.falsePositiveDelta === "number" ? benchmark.falsePositiveDelta : "--"} • FN {typeof benchmark.falseNegativeDelta === "number" ? benchmark.falseNegativeDelta : "--"}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="min-w-[180px]">
+                          <Select
+                            value={draft.recommendation}
+                            onValueChange={(value: ModelBenchmarkRecommendation) =>
+                              handleBenchmarkEditChange(benchmark.id, { recommendation: value })
+                            }
+                          >
+                            <SelectTrigger className="h-9">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="keep-current">Keep Current</SelectItem>
+                              <SelectItem value="replace-model">Replace Model</SelectItem>
+                              <SelectItem value="fine-tune">Fine-Tune</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell className="min-w-[150px]">
+                          <Select
+                            value={draft.status}
+                            onValueChange={(value: ModelBenchmarkStatus) =>
+                              handleBenchmarkEditChange(benchmark.id, { status: value })
+                            }
+                          >
+                            <SelectTrigger className="h-9">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="draft">Draft</SelectItem>
+                              <SelectItem value="reviewed">Reviewed</SelectItem>
+                              <SelectItem value="approved">Approved</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell className="min-w-[240px]">
+                          <Textarea
+                            value={draft.benchmarkNotes}
+                            onChange={(event) =>
+                              handleBenchmarkEditChange(benchmark.id, {
+                                benchmarkNotes: event.target.value,
+                              })
+                            }
+                            rows={3}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-2"
+                            onClick={() => void handleSaveBenchmark(benchmark.id)}
+                          >
+                            <Save className="h-4 w-4" />
+                            Simpan
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
+      )}
+
+      {modelsView === "deployment" && (
       <div className="mt-6 grid gap-6 xl:grid-cols-[0.95fr,1.05fr]">
         <Card className="border-border/60">
           <CardHeader>
             <CardTitle>Deployment Gate Guidance</CardTitle>
             <CardDescription>
-              Tahap 1 `Deployment Gate` dipakai untuk keputusan sederhana sebelum model kandidat dipakai operasional: approve, reject, atau promote ke active.
+              Tahap ini adalah keputusan akhir. Gunakan hanya setelah Anda yakin hasil training, evaluation, dan benchmark sudah cukup jelas.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 p-4">
+              <p className="text-sm font-medium text-foreground">Cara pakai cepat</p>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <p><span className="font-medium text-foreground">1. Approve:</span> gunakan jika model kandidat layak dilanjutkan dan tidak ada masalah besar dari hasil evaluasi.</p>
+                <p><span className="font-medium text-foreground">2. Reject:</span> gunakan jika model jelas tidak layak dipakai operasional.</p>
+                <p><span className="font-medium text-foreground">3. Set Active:</span> gunakan hanya jika model sudah siap dipakai sistem secara nyata.</p>
+                <p><span className="font-medium text-foreground">4. Catatan penting:</span> satu modul hanya boleh punya satu model aktif pada saat yang sama.</p>
+              </div>
+            </div>
             <div className="rounded-2xl border border-border/70 bg-secondary/15 p-4">
               <p className="font-medium text-foreground">Aturan stage 1</p>
               <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
@@ -1679,10 +2600,19 @@ export default function Models() {
           <CardHeader>
             <CardTitle>Deployment Gate</CardTitle>
             <CardDescription>
-              Daftar semua model version. Dari sini kandidat bisa di-approve, di-reject, atau dipromosikan menjadi model aktif per modul.
+              Daftar semua model version. Panel ini sebaiknya dipakai sebagai langkah keputusan akhir, bukan tempat eksperimen awal.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-lg border border-border/70 bg-secondary/10 p-4 text-sm text-muted-foreground">
+              Tips membaca daftar ini:
+              <div className="mt-2 space-y-1">
+                <p><span className="font-medium text-foreground">Candidate:</span> model baru dari training job, belum diputuskan.</p>
+                <p><span className="font-medium text-foreground">Approved:</span> model lolos review, tapi belum dipakai aktif.</p>
+                <p><span className="font-medium text-foreground">Active:</span> model yang saat ini dipakai sistem.</p>
+                <p><span className="font-medium text-foreground">Rejected:</span> model disimpan sebagai catatan, tapi tidak dipakai.</p>
+              </div>
+            </div>
             {isLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1748,6 +2678,7 @@ export default function Models() {
           </CardContent>
         </Card>
       </div>
+      )}
     </DashboardLayout>
   );
 }

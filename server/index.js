@@ -18,6 +18,7 @@ const {
   SUPABASE_URL,
   SUPABASE_ANON_KEY,
   PORT = 8081,
+  HOST = "127.0.0.1",
   ANALYSIS_OUTPUT_ROOT,
 } = process.env;
 
@@ -26,12 +27,30 @@ const analysisScriptPath = path.resolve(
   repoRoot,
   "tools/no_helmet_analysis/analyze_no_helmet.py"
 );
+const workingAtHeightScriptPath = path.resolve(
+  repoRoot,
+  "tools/no_helmet_analysis/analyze_presence_zone.py"
+);
+const redLightViolationScriptPath = path.resolve(
+  repoRoot,
+  "tools/no_helmet_analysis/analyze_red_light_violation.py"
+);
+const dumpTruckBedOpenScriptPath = path.resolve(
+  repoRoot,
+  "tools/no_helmet_analysis/analyze_dump_truck_bed_open.py"
+);
 const defaultRoiConfigPath = path.resolve(
   repoRoot,
   "tools/no_helmet_analysis/area_produksi.roi.json"
 );
 const defaultModelPath = path.resolve(
   process.env.ANALYSIS_DEFAULT_MODEL_PATH || path.join(repoRoot, "models/detect-construction-safety-best.pt")
+);
+const lifeVestBaselineModelPath = path.resolve(
+  process.env.ANALYSIS_LIFE_VEST_MODEL_PATH || path.join(repoRoot, "models/life-vest-baseline.pt")
+);
+const operationsGeneralModelPath = path.resolve(
+  process.env.ANALYSIS_OPERATIONS_MODEL_PATH || path.join(repoRoot, "models/yolo11l.pt")
 );
 const configuredAnalysisOutputRoot = path.resolve(
   ANALYSIS_OUTPUT_ROOT || path.join(repoRoot, "runtime-analysis")
@@ -44,6 +63,7 @@ const modelDatasetsPath = path.resolve(repoRoot, "server/data/model-datasets.jso
 const modelTrainingJobsPath = path.resolve(repoRoot, "server/data/model-training-jobs.json");
 const modelVersionsPath = path.resolve(repoRoot, "server/data/model-versions.json");
 const modelEvaluationsPath = path.resolve(repoRoot, "server/data/model-evaluations.json");
+const modelBenchmarksPath = path.resolve(repoRoot, "server/data/model-benchmarks.json");
 fs.mkdirSync(configuredAnalysisOutputRoot, { recursive: true });
 const analysisOutputRoot = fs.realpathSync.native(configuredAnalysisOutputRoot);
 const uploadRoot = path.join(analysisOutputRoot, "uploads");
@@ -55,6 +75,7 @@ fs.mkdirSync(path.dirname(modelDatasetsPath), { recursive: true });
 fs.mkdirSync(path.dirname(modelTrainingJobsPath), { recursive: true });
 fs.mkdirSync(path.dirname(modelVersionsPath), { recursive: true });
 fs.mkdirSync(path.dirname(modelEvaluationsPath), { recursive: true });
+fs.mkdirSync(path.dirname(modelBenchmarksPath), { recursive: true });
 fs.mkdirSync(uploadRoot, { recursive: true });
 fs.mkdirSync(previewRoot, { recursive: true });
 
@@ -93,6 +114,10 @@ if (!fs.existsSync(modelVersionsPath)) {
 
 if (!fs.existsSync(modelEvaluationsPath)) {
   fs.writeFileSync(modelEvaluationsPath, JSON.stringify([], null, 2));
+}
+
+if (!fs.existsSync(modelBenchmarksPath)) {
+  fs.writeFileSync(modelBenchmarksPath, JSON.stringify([], null, 2));
 }
 
 const resolvePythonCommand = () => {
@@ -177,6 +202,82 @@ const noSafetyVestPayloadSchema = z.object({
   violationLabels: z.array(z.string().trim().min(1)).optional(),
 });
 
+const noLifeVestPayloadSchema = z.object({
+  mediaSourceId: z.string().trim().min(1).optional(),
+  videoPath: z.string().trim().min(1),
+  modelPath: z.string().trim().min(1),
+  roiConfigPath: z.string().trim().min(1).optional(),
+  roiId: z.string().trim().min(1).optional(),
+  roiNormalized: z.boolean().optional(),
+  roiPolygon: z
+    .array(z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]))
+    .min(3)
+    .optional(),
+  confidenceThreshold: z.number().min(0).max(1).optional(),
+  iouThreshold: z.number().min(0).max(1).optional(),
+  violationOnFrames: z.number().int().positive().optional(),
+  cleanOffFrames: z.number().int().positive().optional(),
+  frameStep: z.number().int().positive().optional(),
+  imageSize: z.number().int().positive().optional(),
+  personLabels: z.array(z.string().trim().min(1)).optional(),
+  vestLabels: z.array(z.string().trim().min(1)).optional(),
+  violationLabels: z.array(z.string().trim().min(1)).optional(),
+});
+
+const workingAtHeightPayloadSchema = z.object({
+  mediaSourceId: z.string().trim().min(1).optional(),
+  videoPath: z.string().trim().min(1),
+  modelPath: z.string().trim().min(1),
+  zoneConfigPath: z.string().trim().min(1).optional(),
+  zoneId: z.string().trim().min(1).optional(),
+  zoneNormalized: z.boolean().optional(),
+  zonePolygon: z.array(z.tuple([z.number(), z.number()])).min(3).optional(),
+  confidenceThreshold: z.number().min(0).max(1).optional(),
+  iouThreshold: z.number().min(0).max(1).optional(),
+  frameStep: z.number().int().min(1).optional(),
+  imageSize: z.number().int().min(64).optional(),
+  personLabels: z.array(z.string().trim().min(1)).optional(),
+  minimumPresenceSeconds: z.number().min(0).optional(),
+});
+
+const redLightViolationPayloadSchema = z.object({
+  mediaSourceId: z.string().trim().min(1).optional(),
+  videoPath: z.string().trim().min(1),
+  vehicleModelPath: z.string().trim().min(1),
+  trafficLightModelPath: z.string().trim().min(1),
+  stopLineConfigPath: z.string().trim().min(1).optional(),
+  intersectionId: z.string().trim().min(1).optional(),
+  stopLineNormalized: z.boolean().optional(),
+  stopLinePolygon: z.array(z.tuple([z.number(), z.number()])).min(3).optional(),
+  confidenceThreshold: z.number().min(0).max(1).optional(),
+  iouThreshold: z.number().min(0).max(1).optional(),
+  frameStep: z.number().int().min(1).optional(),
+  imageSize: z.number().int().min(64).optional(),
+  vehicleLabels: z.array(z.string().trim().min(1)).optional(),
+  redLightLabels: z.array(z.string().trim().min(1)).optional(),
+  greenLightLabels: z.array(z.string().trim().min(1)).optional(),
+  crossingWindowSeconds: z.number().min(0).optional(),
+});
+
+const dumpTruckBedOpenPayloadSchema = z.object({
+  mediaSourceId: z.string().trim().min(1).optional(),
+  videoPath: z.string().trim().min(1),
+  modelPath: z.string().trim().min(1),
+  roiConfigPath: z.string().trim().min(1).optional(),
+  roiId: z.string().trim().min(1).optional(),
+  roiNormalized: z.boolean().optional(),
+  roiPolygon: z.array(z.tuple([z.number(), z.number()])).min(3).optional(),
+  confidenceThreshold: z.number().min(0).max(1).optional(),
+  iouThreshold: z.number().min(0).max(1).optional(),
+  frameStep: z.number().int().min(1).optional(),
+  imageSize: z.number().int().min(64).optional(),
+  truckLabels: z.array(z.string().trim().min(1)).optional(),
+  bedOpenLabels: z.array(z.string().trim().min(1)).optional(),
+  bedClosedLabels: z.array(z.string().trim().min(1)).optional(),
+  movementThreshold: z.number().min(0).optional(),
+  minimumMovingSeconds: z.number().min(0).optional(),
+});
+
 const noSafetyVestConfigSchema = z.object({
   modelSource: z.enum(["deployment-gate", "manual"]).default("deployment-gate"),
   modelPath: z.string().trim().min(1),
@@ -185,7 +286,25 @@ const noSafetyVestConfigSchema = z.object({
   confidenceThreshold: z.string().trim().min(1),
   iouThreshold: z.string().trim().min(1),
   vestLabels: z.string().trim().min(1),
-  violationLabels: z.string().trim().min(1),
+  violationLabels: z.string(),
+  violationOnFrames: z.string().trim().min(1),
+  cleanOffFrames: z.string().trim().min(1),
+  frameStep: z.string().trim().min(1),
+  imageSize: z.string().trim().min(1),
+  requiredPpe: z.string().trim().min(1),
+  alertCooldownSeconds: z.string().trim().min(1),
+  operationalNotes: z.string(),
+});
+
+const noLifeVestConfigSchema = z.object({
+  modelSource: z.enum(["deployment-gate", "manual"]).default("deployment-gate"),
+  modelPath: z.string().trim().min(1),
+  roiId: z.string().trim().min(1),
+  roiConfigPath: z.string(),
+  confidenceThreshold: z.string().trim().min(1),
+  iouThreshold: z.string().trim().min(1),
+  lifeVestLabels: z.string().trim().min(1),
+  violationLabels: z.string(),
   violationOnFrames: z.string().trim().min(1),
   cleanOffFrames: z.string().trim().min(1),
   frameStep: z.string().trim().min(1),
@@ -213,6 +332,58 @@ const safetyRulesConfigSchema = z.object({
   incidentNarrativeTemplate: z.string().trim().min(1),
 });
 
+const workingAtHeightConfigSchema = z.object({
+  modelSource: z.enum(["deployment-gate", "manual"]).default("deployment-gate"),
+  modelPath: z.string().trim().min(1),
+  zoneId: z.string().trim().min(1),
+  zoneConfigPath: z.string(),
+  personLabels: z.string().trim().min(1),
+  confidenceThreshold: z.string().trim().min(1),
+  iouThreshold: z.string().trim().min(1),
+  frameStep: z.string().trim().min(1),
+  imageSize: z.string().trim().min(1),
+  minimumPresenceSeconds: z.string().trim().min(1),
+  requiredPpeAtHeight: z.string().trim().min(1),
+  alertCooldownSeconds: z.string().trim().min(1),
+  operationalNotes: z.string(),
+});
+
+const redLightViolationConfigSchema = z.object({
+  modelSource: z.enum(["deployment-gate", "manual"]).default("deployment-gate"),
+  vehicleModelPath: z.string().trim().min(1),
+  trafficLightModelPath: z.string().trim().min(1),
+  intersectionId: z.string().trim().min(1),
+  stopLineConfigPath: z.string(),
+  vehicleLabels: z.string().trim().min(1),
+  redLightLabels: z.string().trim().min(1),
+  greenLightLabels: z.string().trim().min(1),
+  confidenceThreshold: z.string().trim().min(1),
+  iouThreshold: z.string().trim().min(1),
+  frameStep: z.string().trim().min(1),
+  imageSize: z.string().trim().min(1),
+  crossingWindowSeconds: z.string().trim().min(1),
+  alertCooldownSeconds: z.string().trim().min(1),
+  operationalNotes: z.string(),
+});
+
+const dumpTruckBedOpenConfigSchema = z.object({
+  modelSource: z.enum(["deployment-gate", "manual"]).default("deployment-gate"),
+  modelPath: z.string().trim().min(1),
+  roiId: z.string().trim().min(1),
+  roiConfigPath: z.string(),
+  truckLabels: z.string().trim().min(1),
+  bedOpenLabels: z.string().trim().min(1),
+  bedClosedLabels: z.string().trim().min(1),
+  confidenceThreshold: z.string().trim().min(1),
+  iouThreshold: z.string().trim().min(1),
+  frameStep: z.string().trim().min(1),
+  imageSize: z.string().trim().min(1),
+  movementThreshold: z.string().trim().min(1),
+  minimumMovingSeconds: z.string().trim().min(1),
+  alertCooldownSeconds: z.string().trim().min(1),
+  operationalNotes: z.string(),
+});
+
 const noHelmetConfigSchema = z.object({
   modelSource: z.enum(["deployment-gate", "manual"]).default("deployment-gate"),
   modelPath: z.string().trim().min(1),
@@ -237,7 +408,11 @@ const noHelmetConfigSchema = z.object({
 const moduleConfigSchemas = {
   "no-helmet": noHelmetConfigSchema,
   "no-safety-vest": noSafetyVestConfigSchema,
+  "no-life-vest": noLifeVestConfigSchema,
   "safety-rules": safetyRulesConfigSchema,
+  "working-at-height": workingAtHeightConfigSchema,
+  "red-light-violation": redLightViolationConfigSchema,
+  "dump-truck-bed-open": dumpTruckBedOpenConfigSchema,
 };
 
 const defaultModuleConfigs = {
@@ -280,6 +455,24 @@ const defaultModuleConfigs = {
     operationalNotes:
       "Gunakan modul ini untuk inspeksi rompi keselamatan pada area produksi, loading point, dan jalur pejalan kaki. Baseline default disarankan memakai model positive vest yang stabil, lalu fallback logic menangani missing vest.",
   },
+  "no-life-vest": {
+    modelSource: "deployment-gate",
+    modelPath: lifeVestBaselineModelPath,
+    roiId: "area-air-life-vest",
+    roiConfigPath: "",
+    confidenceThreshold: "0.28",
+    iouThreshold: "0.30",
+    lifeVestLabels: "life-vest, life vest, life_jacket",
+    violationLabels: "",
+    violationOnFrames: "3",
+    cleanOffFrames: "3",
+    frameStep: "2",
+    imageSize: "1280",
+    requiredPpe: "life vest, helmet",
+    alertCooldownSeconds: "90",
+    operationalNotes:
+      "Gunakan modul ini untuk area dermaga, ponton, atau area dekat air. Baseline default disarankan memakai model positive life vest yang stabil, lalu fallback logic menangani missing life vest.",
+  },
   "safety-rules": {
     modelSource: "deployment-gate",
     ruleProfileName: "General Site Safety",
@@ -298,6 +491,58 @@ const defaultModuleConfigs = {
       "Kirim alert ke supervisor area dan catat pelanggaran berulang sebagai incident review.",
     incidentNarrativeTemplate:
       "Pelanggaran aturan keselamatan terdeteksi pada area terbatas. Verifikasi visual operator diperlukan sebelum eskalasi.",
+  },
+  "working-at-height": {
+    modelSource: "deployment-gate",
+    modelPath: defaultModelPath,
+    zoneId: "working-at-height-zone",
+    zoneConfigPath: "",
+    personLabels: "person",
+    confidenceThreshold: "0.25",
+    iouThreshold: "0.30",
+    frameStep: "2",
+    imageSize: "1280",
+    minimumPresenceSeconds: "3",
+    requiredPpeAtHeight: "helmet, safety vest, safety harness",
+    alertCooldownSeconds: "120",
+    operationalNotes:
+      "Gunakan modul ini untuk area scaffold, platform, atau elevasi lain. Fase awal memakai zone-based assessment terhadap keberadaan person pada area kerja di ketinggian.",
+  },
+  "red-light-violation": {
+    modelSource: "deployment-gate",
+    vehicleModelPath: operationsGeneralModelPath,
+    trafficLightModelPath: operationsGeneralModelPath,
+    intersectionId: "mine-intersection-main",
+    stopLineConfigPath: "",
+    vehicleLabels: "truck, car, pickup, bus, vehicle",
+    redLightLabels: "red-light, red_signal, red",
+    greenLightLabels: "green-light, green_signal, green",
+    confidenceThreshold: "0.30",
+    iouThreshold: "0.30",
+    frameStep: "2",
+    imageSize: "1280",
+    crossingWindowSeconds: "2.5",
+    alertCooldownSeconds: "120",
+    operationalNotes:
+      "Gunakan modul ini untuk persimpangan tambang atau hauling road dengan lampu lalu lintas. Source harus melihat lampu dan stop line secara jelas agar crossing saat merah bisa diverifikasi.",
+  },
+  "dump-truck-bed-open": {
+    modelSource: "deployment-gate",
+    modelPath: operationsGeneralModelPath,
+    roiId: "hauling-road-dump-truck",
+    roiConfigPath: "",
+    truckLabels: "dump-truck, truck, hauling-truck",
+    bedOpenLabels: "bed-open, bak-terbuka, dump-bed-open",
+    bedClosedLabels: "bed-closed, bak-tertutup, dump-bed-closed",
+    confidenceThreshold: "0.30",
+    iouThreshold: "0.30",
+    frameStep: "2",
+    imageSize: "1280",
+    movementThreshold: "0.10",
+    minimumMovingSeconds: "2",
+    alertCooldownSeconds: "120",
+    operationalNotes:
+      "Gunakan modul ini untuk hauling road atau jalur perpindahan dump truck. Phase 1 fokus pada truck bergerak dengan bak yang masih terbuka.",
   },
 };
 
@@ -334,6 +579,65 @@ const PPE_ANALYSIS_DEFINITIONS = {
     fallbackToMissingPositive: true,
     vetoOnPositiveEvidence: true,
   },
+  no_life_vest: {
+    analysisType: "no_life_vest",
+    eventType: "no_life_vest",
+    moduleKey: "ppe.no-life-vest",
+    configKey: "no-life-vest",
+    findingType: "missing-life-vest",
+    findingLabel: "no life vest",
+    title: "Pekerja tanpa pelampung terdeteksi",
+    detailLabel: "no life vest",
+    recommendation:
+      "Verifikasi visual di lapangan dan tindak lanjuti pelanggaran pelampung pada area air atau area kerja dekat perairan.",
+    requiredPpe: ["life vest"],
+    labels: ["person", "life-vest", "no-life-vest"],
+    matchRegion: "torso",
+    fallbackToMissingPositive: true,
+    vetoOnPositiveEvidence: true,
+  },
+};
+
+const WORKING_AT_HEIGHT_ANALYSIS_DEFINITION = {
+  analysisType: "working_at_height",
+  eventType: "working_at_height",
+  moduleKey: "hse.working-at-height",
+  findingType: "working-at-height",
+  findingLabel: "working at height",
+  title: "Aktivitas bekerja di ketinggian terdeteksi",
+  detailLabel: "working at height",
+  recommendation:
+    "Verifikasi visual di lapangan, pastikan area elevasi diawasi, dan cek kepatuhan APD untuk pekerjaan di ketinggian.",
+  requiredPpe: ["helmet", "safety vest", "safety harness"],
+  labels: ["person", "working-at-height"],
+};
+
+const RED_LIGHT_VIOLATION_ANALYSIS_DEFINITION = {
+  analysisType: "red_light_violation",
+  eventType: "red_light_violation",
+  moduleKey: "operations.red-light-violation",
+  findingType: "red-light-violation",
+  findingLabel: "red light violation",
+  title: "Pelanggaran lampu merah terdeteksi",
+  detailLabel: "red light violation",
+  recommendation:
+    "Verifikasi visual kendaraan yang melintasi stop line saat lampu merah dan tindak lanjuti pelanggaran persimpangan.",
+  requiredPpe: [],
+  labels: ["vehicle", "red-light", "green-light"],
+};
+
+const DUMP_TRUCK_BED_OPEN_ANALYSIS_DEFINITION = {
+  analysisType: "dump_truck_bed_open",
+  eventType: "dump_truck_bed_open",
+  moduleKey: "operations.dump-truck-bed-open",
+  findingType: "dump-truck-bed-open",
+  findingLabel: "dump truck bed open",
+  title: "Dump truck bergerak dengan bak terbuka",
+  detailLabel: "dump truck bed open",
+  recommendation:
+    "Verifikasi visual dump truck yang bergerak dengan bak masih terbuka dan tindak lanjuti pelanggaran operasional hauling road.",
+  requiredPpe: [],
+  labels: ["dump-truck", "bed-open", "bed-closed"],
 };
 
 const hseSafetyRulesPayloadSchema = z.object({
@@ -357,7 +661,7 @@ const modelDatasetSchema = z.object({
 
 const createModelDatasetPayloadSchema = z.object({
   name: z.string().trim().min(1),
-  domain: z.enum(["PPE", "HSE"]),
+  domain: z.enum(["PPE", "HSE", "Operations"]),
   labels: z.array(z.string().trim().min(1)).min(1),
   sourceType: z.enum(["upload", "camera", "mixed"]),
   imageCount: z.number().int().min(0).default(0),
@@ -369,7 +673,7 @@ const createModelDatasetPayloadSchema = z.object({
 
 const updateModelDatasetPayloadSchema = z.object({
   name: z.string().trim().min(1).optional(),
-  domain: z.enum(["PPE", "HSE"]).optional(),
+  domain: z.enum(["PPE", "HSE", "Operations"]).optional(),
   labels: z.array(z.string().trim().min(1)).min(1).optional(),
   sourceType: z.enum(["upload", "camera", "mixed"]).optional(),
   imageCount: z.number().int().min(0).optional(),
@@ -384,7 +688,15 @@ const modelTrainingJobSchema = z.object({
   datasetId: z.string().trim().min(1),
   datasetName: z.string().trim().min(1),
   domain: z.enum(["PPE", "HSE"]),
-  targetModule: z.enum(["ppe.no-helmet", "ppe.no-safety-vest", "hse.safety-rules"]),
+  targetModule: z.enum([
+    "ppe.no-helmet",
+    "ppe.no-safety-vest",
+    "ppe.no-life-vest",
+    "hse.safety-rules",
+    "hse.working-at-height",
+    "operations.red-light-violation",
+    "operations.dump-truck-bed-open",
+  ]),
   baseModelPath: z.string().trim().min(1),
   outputModelPath: z.string().trim().min(1).nullable(),
   labels: z.array(z.string().trim().min(1)),
@@ -401,7 +713,15 @@ const modelTrainingJobSchema = z.object({
 
 const createModelTrainingJobPayloadSchema = z.object({
   datasetId: z.string().trim().min(1),
-  targetModule: z.enum(["ppe.no-helmet", "ppe.no-safety-vest", "hse.safety-rules"]),
+  targetModule: z.enum([
+    "ppe.no-helmet",
+    "ppe.no-safety-vest",
+    "ppe.no-life-vest",
+    "hse.safety-rules",
+    "hse.working-at-height",
+    "operations.red-light-violation",
+    "operations.dump-truck-bed-open",
+  ]),
   baseModelPath: z.string().trim().min(1),
   epochs: z.number().int().min(1).default(50),
   imageSize: z.number().int().min(1).default(1280),
@@ -418,8 +738,16 @@ const updateModelTrainingJobPayloadSchema = z.object({
 const modelVersionSchema = z.object({
   id: z.string().trim().min(1),
   name: z.string().trim().min(1),
-  moduleKey: z.enum(["ppe.no-helmet", "ppe.no-safety-vest", "hse.safety-rules"]),
-  domain: z.enum(["PPE", "HSE"]),
+  moduleKey: z.enum([
+    "ppe.no-helmet",
+    "ppe.no-safety-vest",
+    "ppe.no-life-vest",
+    "hse.safety-rules",
+    "hse.working-at-height",
+    "operations.red-light-violation",
+    "operations.dump-truck-bed-open",
+  ]),
+  domain: z.enum(["PPE", "HSE", "Operations"]),
   labels: z.array(z.string().trim().min(1)),
   modelPath: z.string().trim().min(1),
   sourceJobId: z.string().trim().min(1).nullable(),
@@ -433,14 +761,50 @@ const modelEvaluationSchema = z.object({
   id: z.string().trim().min(1),
   modelVersionId: z.string().trim().min(1),
   modelName: z.string().trim().min(1),
-  moduleKey: z.enum(["ppe.no-helmet", "ppe.no-safety-vest", "hse.safety-rules"]),
-  domain: z.enum(["PPE", "HSE"]),
+  moduleKey: z.enum([
+    "ppe.no-helmet",
+    "ppe.no-safety-vest",
+    "ppe.no-life-vest",
+    "hse.safety-rules",
+    "hse.working-at-height",
+    "operations.red-light-violation",
+    "operations.dump-truck-bed-open",
+  ]),
+  domain: z.enum(["PPE", "HSE", "Operations"]),
   status: z.enum(["draft", "reviewed", "approved", "rejected"]),
   precision: z.number().min(0).max(1).nullable(),
   recall: z.number().min(0).max(1).nullable(),
   map50: z.number().min(0).max(1).nullable(),
   falsePositiveNotes: z.string(),
   falseNegativeNotes: z.string(),
+  benchmarkNotes: z.string(),
+  createdAt: z.string().trim().min(1),
+  updatedAt: z.string().trim().min(1),
+});
+
+const modelBenchmarkSchema = z.object({
+  id: z.string().trim().min(1),
+  datasetId: z.string().trim().min(1),
+  datasetName: z.string().trim().min(1),
+  modelVersionId: z.string().trim().min(1),
+  modelName: z.string().trim().min(1),
+  moduleKey: z.enum([
+    "ppe.no-helmet",
+    "ppe.no-safety-vest",
+    "ppe.no-life-vest",
+    "hse.safety-rules",
+    "hse.working-at-height",
+    "operations.red-light-violation",
+    "operations.dump-truck-bed-open",
+  ]),
+  domain: z.enum(["PPE", "HSE", "Operations"]),
+  baselineModelPath: z.string().trim().min(1),
+  recommendation: z.enum(["keep-current", "replace-model", "fine-tune"]),
+  status: z.enum(["draft", "reviewed", "approved"]),
+  precisionDelta: z.number().nullable(),
+  recallDelta: z.number().nullable(),
+  falsePositiveDelta: z.number().nullable(),
+  falseNegativeDelta: z.number().nullable(),
   benchmarkNotes: z.string(),
   createdAt: z.string().trim().min(1),
   updatedAt: z.string().trim().min(1),
@@ -464,6 +828,30 @@ const updateModelEvaluationPayloadSchema = z.object({
   map50: z.number().min(0).max(1).nullable().optional(),
   falsePositiveNotes: z.string().optional(),
   falseNegativeNotes: z.string().optional(),
+  benchmarkNotes: z.string().optional(),
+});
+
+const createModelBenchmarkPayloadSchema = z.object({
+  datasetId: z.string().trim().min(1),
+  modelVersionId: z.string().trim().min(1),
+  baselineModelPath: z.string().trim().min(1),
+  recommendation: z.enum(["keep-current", "replace-model", "fine-tune"]).default("keep-current"),
+  status: z.enum(["draft", "reviewed", "approved"]).default("draft"),
+  precisionDelta: z.number().nullable().default(null),
+  recallDelta: z.number().nullable().default(null),
+  falsePositiveDelta: z.number().nullable().default(null),
+  falseNegativeDelta: z.number().nullable().default(null),
+  benchmarkNotes: z.string().default(""),
+});
+
+const updateModelBenchmarkPayloadSchema = z.object({
+  baselineModelPath: z.string().trim().min(1).optional(),
+  recommendation: z.enum(["keep-current", "replace-model", "fine-tune"]).optional(),
+  status: z.enum(["draft", "reviewed", "approved"]).optional(),
+  precisionDelta: z.number().nullable().optional(),
+  recallDelta: z.number().nullable().optional(),
+  falsePositiveDelta: z.number().nullable().optional(),
+  falseNegativeDelta: z.number().nullable().optional(),
   benchmarkNotes: z.string().optional(),
 });
 
@@ -660,7 +1048,11 @@ const appendAnalysisHistory = (entry) => {
 const modelTargetModuleByConfigKey = {
   "no-helmet": "ppe.no-helmet",
   "no-safety-vest": "ppe.no-safety-vest",
+  "no-life-vest": "ppe.no-life-vest",
   "safety-rules": "hse.safety-rules",
+  "working-at-height": "hse.working-at-height",
+  "red-light-violation": "operations.red-light-violation",
+  "dump-truck-bed-open": "operations.dump-truck-bed-open",
 };
 
 const DEFAULT_MODEL_VERSION_SEEDS = [
@@ -689,6 +1081,18 @@ const DEFAULT_MODEL_VERSION_SEEDS = [
     status: "active",
   },
   {
+    id: "model-version-ppe-no-life-vest-default",
+    name: "Life Vest Baseline",
+    moduleKey: "ppe.no-life-vest",
+    domain: "PPE",
+    labels: ["person", "life-vest"],
+    modelPath: lifeVestBaselineModelPath,
+    sourceJobId: null,
+    evaluationSummary:
+      "Baseline awal terpisah untuk modul pelampung/life vest. Path model ini disiapkan khusus agar dapat diganti dengan model life vest domain perairan melalui Training Jobs dan Deployment Gate.",
+    status: "active",
+  },
+  {
     id: "model-version-hse-safety-rules-default",
     name: "Safety Rules Baseline",
     moduleKey: "hse.safety-rules",
@@ -698,6 +1102,42 @@ const DEFAULT_MODEL_VERSION_SEEDS = [
     sourceJobId: null,
     evaluationSummary:
       "Baseline policy HSE yang memakai evidence PPE/HSE default sebelum kandidat model khusus diaktifkan.",
+    status: "active",
+  },
+  {
+    id: "model-version-hse-working-at-height-default",
+    name: "Working at Height Baseline",
+    moduleKey: "hse.working-at-height",
+    domain: "HSE",
+    labels: ["person"],
+    modelPath: defaultModelPath,
+    sourceJobId: null,
+    evaluationSummary:
+      "Baseline awal untuk modul working at height berbasis detector person dan zone area ketinggian.",
+    status: "active",
+  },
+  {
+    id: "model-version-operations-red-light-default",
+    name: "Operations General Baseline",
+    moduleKey: "operations.red-light-violation",
+    domain: "Operations",
+    labels: ["vehicle", "red-light", "green-light"],
+    modelPath: operationsGeneralModelPath,
+    sourceJobId: null,
+    evaluationSummary:
+      "Baseline umum Operations berbasis detector kendaraan dan traffic light resmi Ultralytics. Dipakai sebagai starting point untuk red light violation sebelum model domain tambang yang lebih spesifik tersedia.",
+    status: "active",
+  },
+  {
+    id: "model-version-operations-dump-truck-default",
+    name: "Dump Truck Operations Baseline",
+    moduleKey: "operations.dump-truck-bed-open",
+    domain: "Operations",
+    labels: ["dump-truck", "bed-open", "bed-closed"],
+    modelPath: operationsGeneralModelPath,
+    sourceJobId: null,
+    evaluationSummary:
+      "Baseline umum Operations berbasis detector kendaraan resmi Ultralytics. Dipakai sebagai starting point modul dump truck sebelum model state bak terbuka/tertutup khusus tersedia.",
     status: "active",
   },
 ];
@@ -747,6 +1187,36 @@ const resolveModuleConfigEnvelope = (moduleKey) => {
     resolvedModelPath = activeModel?.modelPath && fileExists(activeModel.modelPath)
       ? activeModel.modelPath
       : defaultModelPath;
+  }
+
+  if (moduleKey === "red-light-violation") {
+    const resolveOperationsModelPath = (value) => {
+      let resolvedPath =
+        usesDeploymentGate && activeModel?.modelPath
+          ? activeModel.modelPath
+          : value;
+      const isContainerPath = String(resolvedPath || "").trim().startsWith("/app/");
+      if (isContainerPath && !fileExists(resolvedPath) && fileExists(defaultModelPath)) {
+        resolvedPath =
+          activeModel?.modelPath && fileExists(activeModel.modelPath)
+            ? activeModel.modelPath
+            : defaultModelPath;
+      }
+      return resolvedPath;
+    };
+
+    return {
+      ok: true,
+      activeModel,
+      targetModuleKey,
+      config: {
+        ...parsed.data,
+        vehicleModelPath: resolveOperationsModelPath(parsed.data.vehicleModelPath),
+        trafficLightModelPath: resolveOperationsModelPath(parsed.data.trafficLightModelPath),
+      },
+      resolvedModelPath,
+      usesDeploymentGate,
+    };
   }
 
   return {
@@ -898,6 +1368,27 @@ const writeModelEvaluations = (items) => {
   return items;
 };
 
+const readModelBenchmarks = () => {
+  if (!fileExists(modelBenchmarksPath)) {
+    fs.writeFileSync(modelBenchmarksPath, JSON.stringify([], null, 2));
+    return [];
+  }
+
+  const raw = fs.readFileSync(modelBenchmarksPath, "utf8");
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed)
+    ? parsed
+        .map((item) => modelBenchmarkSchema.safeParse(item))
+        .filter((result) => result.success)
+        .map((result) => result.data)
+    : [];
+};
+
+const writeModelBenchmarks = (items) => {
+  fs.writeFileSync(modelBenchmarksPath, JSON.stringify(items, null, 2));
+  return items;
+};
+
 const buildModelsOverview = () => {
   const datasets = readModelDatasets();
   const trainingJobs = readModelTrainingJobs();
@@ -916,6 +1407,7 @@ const buildModelsOverview = () => {
     domainSplit: {
       PPE: datasets.filter((item) => item.domain === "PPE").length,
       HSE: datasets.filter((item) => item.domain === "HSE").length,
+      Operations: datasets.filter((item) => item.domain === "Operations").length,
     },
     activeModelsByModule: modelVersions
       .filter((item) => item.status === "active")
@@ -939,10 +1431,23 @@ const buildModelsOverview = () => {
 
 const isTrainingJobCompatibleWithDataset = (job, dataset) => {
   if (dataset.domain === "PPE") {
-    return job.targetModule === "ppe.no-helmet" || job.targetModule === "ppe.no-safety-vest";
+    return (
+      job.targetModule === "ppe.no-helmet" ||
+      job.targetModule === "ppe.no-safety-vest" ||
+      job.targetModule === "ppe.no-life-vest"
+    );
   }
   if (dataset.domain === "HSE") {
-    return job.targetModule === "hse.safety-rules";
+    return (
+      job.targetModule === "hse.safety-rules" ||
+      job.targetModule === "hse.working-at-height"
+    );
+  }
+  if (dataset.domain === "Operations") {
+    return (
+      job.targetModule === "operations.red-light-violation" ||
+      job.targetModule === "operations.dump-truck-bed-open"
+    );
   }
   return false;
 };
@@ -1121,6 +1626,15 @@ const severityToRiskScore = (severity) => {
 };
 
 const getPpeAnalysisDefinition = (analysisType) => {
+  if (analysisType === "working_at_height") {
+    return WORKING_AT_HEIGHT_ANALYSIS_DEFINITION;
+  }
+  if (analysisType === "red_light_violation") {
+    return RED_LIGHT_VIOLATION_ANALYSIS_DEFINITION;
+  }
+  if (analysisType === "dump_truck_bed_open") {
+    return DUMP_TRUCK_BED_OPEN_ANALYSIS_DEFINITION;
+  }
   if (!analysisType) {
     return PPE_ANALYSIS_DEFINITIONS.no_helmet;
   }
@@ -1203,6 +1717,210 @@ const buildPpeAnalysisFindings = (summary, context = {}) => {
   });
 };
 
+const buildRedLightViolationAnalysisFindings = (summary, context = {}) => {
+  const events = Array.isArray(summary.events) ? summary.events : [];
+  const definition = RED_LIGHT_VIOLATION_ANALYSIS_DEFINITION;
+  const runId = context.runId || `run-${Date.now()}`;
+  const createdAt = context.createdAt || new Date().toISOString();
+  const sourceId = context.sourceId || "";
+  const sourceName = context.sourceName || "Unknown Source";
+  const sourceLocation = context.sourceLocation || "";
+  const sourceType = context.sourceType || "upload";
+  const outputDir = context.outputDir || null;
+  const configSnapshot = context.configSnapshot || {};
+
+  return events.map((event) => {
+    const durationSeconds = Math.max(
+      0,
+      Number(event.end_time_seconds || 0) - Number(event.start_time_seconds || 0)
+    );
+    const maxConfidence = Number(event.max_confidence || 0);
+    const riskScore = Math.max(55, Math.min(95, Math.round(maxConfidence * 100)));
+    const snapshotUrl = event.snapshotUrl || null;
+    const intersectionId = event.roi_id || configSnapshot.intersectionId || "mine-intersection";
+    const trackId = Number(event.track_id);
+    return {
+      id: `finding-${event.event_id}`,
+      runId,
+      sourceId,
+      sourceName,
+      sourceLocation,
+      sourceType,
+      category: "Operations",
+      moduleKey: definition.moduleKey,
+      findingType: definition.findingType,
+      title: definition.title,
+      detail: `Detector menemukan kendaraan pada track ${trackId} melintasi stop line di area ${intersectionId} saat lampu merah aktif.`,
+      recommendation: definition.recommendation,
+      severity: riskScore >= 85 ? "high" : "medium",
+      status: "open",
+      riskScore,
+      metric: `${durationSeconds.toFixed(1)} s • conf ${maxConfidence.toFixed(2)}`,
+      eventCount: 1,
+      violatorCount: 1,
+      startsAtSeconds: Number(event.start_time_seconds || 0),
+      endsAtSeconds: Number(event.end_time_seconds || 0),
+      durationSeconds,
+      roiId: event.roi_id || null,
+      zoneIds: event.roi_id ? [event.roi_id] : [],
+      requiredPpe: [],
+      trackIds: Number.isFinite(trackId) ? [trackId] : [],
+      labels: definition.labels,
+      snapshotUrl,
+      evidenceUrls: snapshotUrl ? [snapshotUrl] : [],
+      detectorEvidence: {
+        analysisType: definition.analysisType,
+        outputDir,
+        createdAt,
+      },
+      configSnapshot,
+      metadata: {
+        eventId: event.event_id,
+        maxConfidence,
+        eventStatus: event.status || "violation",
+        detectionMode: event.detection_mode || "red-light",
+      },
+      createdAt,
+      updatedAt: createdAt,
+    };
+  });
+};
+
+const buildDumpTruckBedOpenAnalysisFindings = (summary, context = {}) => {
+  const events = Array.isArray(summary.events) ? summary.events : [];
+  const definition = DUMP_TRUCK_BED_OPEN_ANALYSIS_DEFINITION;
+  const runId = context.runId || `run-${Date.now()}`;
+  const createdAt = context.createdAt || new Date().toISOString();
+  const sourceId = context.sourceId || "";
+  const sourceName = context.sourceName || "Unknown Source";
+  const sourceLocation = context.sourceLocation || "";
+  const sourceType = context.sourceType || "upload";
+  const outputDir = context.outputDir || null;
+  const configSnapshot = context.configSnapshot || {};
+
+  return events.map((event) => {
+    const durationSeconds = Math.max(
+      0,
+      Number(event.end_time_seconds || 0) - Number(event.start_time_seconds || 0)
+    );
+    const maxConfidence = Number(event.max_confidence || 0);
+    const riskScore = Math.max(60, Math.min(95, Math.round(maxConfidence * 100)));
+    const snapshotUrl = event.snapshotUrl || null;
+    const roiId = event.roi_id || configSnapshot.roiId || "hauling-road-dump-truck";
+    const trackId = Number(event.track_id);
+    return {
+      id: `finding-${event.event_id}`,
+      runId,
+      sourceId,
+      sourceName,
+      sourceLocation,
+      sourceType,
+      category: "Operations",
+      moduleKey: definition.moduleKey,
+      findingType: definition.findingType,
+      title: definition.title,
+      detail: `Detector menemukan dump truck pada track ${trackId} bergerak di area ${roiId} saat status bak terindikasi terbuka.`,
+      recommendation: definition.recommendation,
+      severity: riskScore >= 85 ? "high" : "medium",
+      status: "open",
+      riskScore,
+      metric: `${durationSeconds.toFixed(1)} s • conf ${maxConfidence.toFixed(2)}`,
+      eventCount: 1,
+      violatorCount: 1,
+      startsAtSeconds: Number(event.start_time_seconds || 0),
+      endsAtSeconds: Number(event.end_time_seconds || 0),
+      durationSeconds,
+      roiId: event.roi_id || null,
+      zoneIds: event.roi_id ? [event.roi_id] : [],
+      requiredPpe: [],
+      trackIds: Number.isFinite(trackId) ? [trackId] : [],
+      labels: definition.labels,
+      snapshotUrl,
+      evidenceUrls: snapshotUrl ? [snapshotUrl] : [],
+      detectorEvidence: {
+        analysisType: definition.analysisType,
+        outputDir,
+        createdAt,
+      },
+      configSnapshot,
+      metadata: {
+        eventId: event.event_id,
+        maxConfidence,
+        eventStatus: event.status || "violation",
+        detectionMode: event.detection_mode || "bed-open-moving",
+      },
+      createdAt,
+      updatedAt: createdAt,
+    };
+  });
+};
+
+const buildWorkingAtHeightAnalysisFindings = (summary, context = {}) => {
+  const events = Array.isArray(summary.events) ? summary.events : [];
+  const definition = WORKING_AT_HEIGHT_ANALYSIS_DEFINITION;
+  const runId = context.runId || `run-${Date.now()}`;
+  const createdAt = context.createdAt || new Date().toISOString();
+  const sourceId = context.sourceId || "";
+  const sourceName = context.sourceName || "Unknown Source";
+  const sourceLocation = context.sourceLocation || "";
+  const sourceType = context.sourceType || "upload";
+  const outputDir = context.outputDir || null;
+  const configSnapshot = context.configSnapshot || {};
+
+  return events.map((event) => {
+    const durationSeconds = Math.max(
+      0,
+      Number(event.end_time_seconds || 0) - Number(event.start_time_seconds || 0)
+    );
+    const riskScore = Math.max(45, Math.min(95, Math.round(Number(event.max_confidence || 0) * 100)));
+    const snapshotUrl = event.snapshotUrl || null;
+    return {
+      id: `finding-${event.event_id}`,
+      runId,
+      sourceId,
+      sourceName,
+      sourceLocation,
+      sourceType,
+      category: "HSE",
+      moduleKey: definition.moduleKey,
+      findingType: definition.findingType,
+      title: definition.title,
+      detail: `Detector menemukan person berada pada zone ${event.roi_id} selama ${durationSeconds.toFixed(1)} detik.`,
+      recommendation: definition.recommendation,
+      severity: riskScore >= 80 ? "high" : "medium",
+      status: "open",
+      riskScore,
+      metric: `${durationSeconds.toFixed(1)} s • conf ${Number(event.max_confidence || 0).toFixed(2)}`,
+      eventCount: 1,
+      violatorCount: 1,
+      startsAtSeconds: Number(event.start_time_seconds || 0),
+      endsAtSeconds: Number(event.end_time_seconds || 0),
+      durationSeconds,
+      roiId: event.roi_id || null,
+      zoneIds: event.roi_id ? [event.roi_id] : [],
+      requiredPpe: definition.requiredPpe,
+      trackIds: Number.isFinite(Number(event.track_id)) ? [Number(event.track_id)] : [],
+      labels: definition.labels,
+      snapshotUrl,
+      evidenceUrls: snapshotUrl ? [snapshotUrl] : [],
+      detectorEvidence: {
+        analysisType: definition.analysisType,
+        outputDir,
+        createdAt,
+      },
+      configSnapshot,
+      metadata: {
+        eventId: event.event_id,
+        maxConfidence: Number(event.max_confidence || 0),
+        eventStatus: event.status || "violation",
+        detectionMode: event.detection_mode || "zone-presence",
+      },
+      createdAt,
+      updatedAt: createdAt,
+    };
+  });
+};
+
 const buildHseAnalysisFindings = (source, config, findings, context = {}) => {
   const runId = context.runId || `hse-run-${Date.now()}`;
   const createdAt = context.createdAt || new Date().toISOString();
@@ -1269,10 +1987,14 @@ const enrichSummary = (req, summary, context = {}) => {
   return {
     ...summary,
     events,
-    analysisFindings: buildPpeAnalysisFindings(
-      { ...summary, events },
-      context
-    ),
+    analysisFindings:
+      context.analysisType === "working_at_height"
+        ? buildWorkingAtHeightAnalysisFindings({ ...summary, events }, context)
+        : context.analysisType === "red_light_violation"
+          ? buildRedLightViolationAnalysisFindings({ ...summary, events }, context)
+          : context.analysisType === "dump_truck_bed_open"
+            ? buildDumpTruckBedOpenAnalysisFindings({ ...summary, events }, context)
+          : buildPpeAnalysisFindings({ ...summary, events }, context),
   };
 };
 
@@ -1362,7 +2084,7 @@ const getLatestRunForSource = (analysisType, mediaSource) => {
   );
 };
 
-const PPE_ANALYSIS_TYPES = new Set(["no_helmet", "no_safety_vest"]);
+const PPE_ANALYSIS_TYPES = new Set(["no_helmet", "no_safety_vest", "no_life_vest"]);
 const LIVE_ALERT_WINDOW_MS = 5 * 60 * 1000;
 
 const getPpeAnalysisHistory = () =>
@@ -1404,12 +2126,25 @@ const buildHseSafetyRulesReport = (req, source, config, context = {}) => {
   const latestNoSafetyVestSummary = latestNoSafetyVestRun
     ? buildLatestAnalysisSummary(req, latestNoSafetyVestRun)
     : null;
+  const latestNoLifeVestRun = getLatestRunForSource("no_life_vest", source);
+  const latestNoLifeVestSummary = latestNoLifeVestRun
+    ? buildLatestAnalysisSummary(req, latestNoLifeVestRun)
+    : null;
+  const latestWorkingAtHeightRun = getLatestRunForSource("working_at_height", source);
+  const latestWorkingAtHeightSummary = latestWorkingAtHeightRun
+    ? buildLatestAnalysisSummary(req, latestWorkingAtHeightRun)
+    : null;
   const requiredPpe = splitCommaSeparated(config.requiredPpe);
   const restrictedZones = splitCommaSeparated(config.restrictedZones);
   const findings = [];
   const readiness = [];
   const requiresHelmet = requiredPpe.some((item) => /helmet/i.test(item));
-  const requiresSafetyVest = requiredPpe.some((item) => /safety\s*vest|vest/i.test(item));
+  const requiresSafetyVest = requiredPpe.some((item) => {
+    const normalized = String(item || "").toLowerCase();
+    return (normalized.includes("safety vest") || normalized === "vest" || normalized.includes("rompi")) &&
+      !normalized.includes("life");
+  });
+  const requiresLifeVest = requiredPpe.some((item) => /life\s*vest|pelampung/i.test(item));
 
   const modelReady = fileExists(config.modelPath);
   readiness.push({
@@ -1539,6 +2274,42 @@ const buildHseSafetyRulesReport = (req, source, config, context = {}) => {
     });
   }
 
+  if (latestNoLifeVestSummary) {
+    if (requiresLifeVest && latestNoLifeVestSummary.violatorCount > 0) {
+      findings.push({
+        id: "life-vest-violation",
+        title: "Pelanggaran pelampung terdeteksi pada baseline HSE",
+        severity: latestNoLifeVestSummary.violatorCount >= 2 ? "high" : "medium",
+        status: "open",
+        detail: `Run terakhir menemukan ${latestNoLifeVestSummary.eventCount} event dan ${latestNoLifeVestSummary.violatorCount} track pelanggar untuk aturan pelampung.`,
+        recommendation: "Verifikasi area kerja dekat air, pastikan life vest wajib dipakai, dan tindak lanjuti pelanggaran berulang.",
+        metric: `${latestNoLifeVestSummary.eventCount} event / ${latestNoLifeVestSummary.violatorCount} violator`,
+      });
+    }
+  } else if (requiresLifeVest) {
+    findings.push({
+      id: "missing-life-vest-evidence",
+      title: "Belum ada evidence pelampung untuk source ini",
+      severity: "medium",
+      status: "open",
+      detail: "Belum ada run PPE • No Life Vest yang bisa dipakai sebagai baseline evidence HSE untuk source ini.",
+      recommendation: "Jalankan analisis PPE • No Life Vest terlebih dulu agar HSE punya evidence visual pelampung.",
+    });
+  }
+
+  if (latestWorkingAtHeightSummary && latestWorkingAtHeightSummary.eventCount > 0) {
+    findings.push({
+      id: "working-at-height-activity",
+      title: "Aktivitas bekerja di ketinggian terdeteksi",
+      severity: latestWorkingAtHeightSummary.violatorCount >= 2 ? "high" : "medium",
+      status: "open",
+      detail: `Run working at height terakhir menemukan ${latestWorkingAtHeightSummary.eventCount} event dan ${latestWorkingAtHeightSummary.violatorCount} track pada zone elevasi.`,
+      recommendation:
+        "Verifikasi visual aktivitas di area ketinggian, pastikan akses zona elevasi sah, dan cek APD wajib untuk pekerjaan di ketinggian.",
+      metric: `${latestWorkingAtHeightSummary.eventCount} event / ${latestWorkingAtHeightSummary.violatorCount} track`,
+    });
+  }
+
   if (
     requiresHelmet &&
     requiresSafetyVest &&
@@ -1557,6 +2328,22 @@ const buildHseSafetyRulesReport = (req, source, config, context = {}) => {
       detail: `Evidence PPE terbaru menunjukkan ${latestNoHelmetSummary.violatorCount} track pelanggar helm dan ${latestNoSafetyVestSummary.violatorCount} track pelanggar rompi keselamatan.`,
       recommendation: "Audit area kerja, evaluasi briefing keselamatan, dan pastikan PPE wajib dipenuhi secara konsisten pada source ini.",
       metric: `${latestNoHelmetSummary.violatorCount} helmet / ${latestNoSafetyVestSummary.violatorCount} vest`,
+    });
+  }
+
+  if (
+    requiresLifeVest &&
+    latestNoLifeVestSummary &&
+    latestNoLifeVestSummary.violatorCount > 0
+  ) {
+    findings.push({
+      id: "life-vest-compliance-pattern",
+      title: "Baseline PPE menunjukkan risiko kepatuhan pelampung",
+      severity: latestNoLifeVestSummary.violatorCount >= 2 ? "high" : "medium",
+      status: "open",
+      detail: `Evidence PPE terbaru menunjukkan ${latestNoLifeVestSummary.violatorCount} track pelanggar pelampung pada source ini.`,
+      recommendation: "Audit area perairan, evaluasi briefing keselamatan kerja dekat air, dan pastikan pelampung wajib dipakai secara konsisten.",
+      metric: `${latestNoLifeVestSummary.violatorCount} life vest`,
     });
   }
 
@@ -1580,7 +2367,11 @@ const buildHseSafetyRulesReport = (req, source, config, context = {}) => {
 
   const readyCount = readiness.filter((item) => item.status === "ready").length;
   const latestSnapshotUrl =
-    latestNoHelmetSummary?.events.find((event) => event.snapshotUrl)?.snapshotUrl || null;
+    latestNoHelmetSummary?.events.find((event) => event.snapshotUrl)?.snapshotUrl ||
+    latestNoSafetyVestSummary?.events.find((event) => event.snapshotUrl)?.snapshotUrl ||
+    latestNoLifeVestSummary?.events.find((event) => event.snapshotUrl)?.snapshotUrl ||
+    latestWorkingAtHeightSummary?.events.find((event) => event.snapshotUrl)?.snapshotUrl ||
+    null;
   const analysisFindings = buildHseAnalysisFindings(source, config, findings, {
     runId: context.runId,
     createdAt: context.createdAt,
@@ -1646,6 +2437,34 @@ const buildHseSafetyRulesReport = (req, source, config, context = {}) => {
               null,
           }
         : null,
+      noLifeVest: latestNoLifeVestSummary
+        ? {
+            analysisType: latestNoLifeVestSummary.analysisType,
+            createdAt: latestNoLifeVestSummary.createdAt,
+            eventCount: latestNoLifeVestSummary.eventCount,
+            violatorCount: latestNoLifeVestSummary.violatorCount,
+            snapshotCount: latestNoLifeVestSummary.snapshotCount,
+            narrative: latestNoLifeVestSummary.narrative,
+            outputDir: latestNoLifeVestSummary.outputDir,
+            latestSnapshotUrl:
+              latestNoLifeVestSummary?.events.find((event) => event.snapshotUrl)?.snapshotUrl ||
+              null,
+          }
+        : null,
+      workingAtHeight: latestWorkingAtHeightSummary
+        ? {
+            analysisType: latestWorkingAtHeightSummary.analysisType,
+            createdAt: latestWorkingAtHeightSummary.createdAt,
+            eventCount: latestWorkingAtHeightSummary.eventCount,
+            violatorCount: latestWorkingAtHeightSummary.violatorCount,
+            snapshotCount: latestWorkingAtHeightSummary.snapshotCount,
+            narrative: latestWorkingAtHeightSummary.narrative,
+            outputDir: latestWorkingAtHeightSummary.outputDir,
+            latestSnapshotUrl:
+              latestWorkingAtHeightSummary?.events.find((event) => event.snapshotUrl)?.snapshotUrl ||
+              null,
+          }
+        : null,
     },
     findings,
     analysisFindings,
@@ -1659,6 +2478,10 @@ const buildHseSafetyRulesReport = (req, source, config, context = {}) => {
       latestNoHelmetViolatorCount: latestNoHelmetSummary?.violatorCount || 0,
       latestNoSafetyVestEventCount: latestNoSafetyVestSummary?.eventCount || 0,
       latestNoSafetyVestViolatorCount: latestNoSafetyVestSummary?.violatorCount || 0,
+      latestNoLifeVestEventCount: latestNoLifeVestSummary?.eventCount || 0,
+      latestNoLifeVestViolatorCount: latestNoLifeVestSummary?.violatorCount || 0,
+      latestWorkingAtHeightEventCount: latestWorkingAtHeightSummary?.eventCount || 0,
+      latestWorkingAtHeightViolatorCount: latestWorkingAtHeightSummary?.violatorCount || 0,
       requiredPpe,
       restrictedZones,
       generatedAt: new Date().toISOString(),
@@ -1889,6 +2712,379 @@ const buildPpeAnalysisJob = (analysisType, payload) => {
 const buildNoHelmetAnalysisJob = (payload) => buildPpeAnalysisJob("no_helmet", payload);
 
 const buildNoSafetyVestAnalysisJob = (payload) => buildPpeAnalysisJob("no_safety_vest", payload);
+
+const buildNoLifeVestAnalysisJob = (payload) => buildPpeAnalysisJob("no_life_vest", payload);
+
+const buildWorkingAtHeightAnalysisJob = (payload) => {
+  const {
+    mediaSourceId,
+    videoPath,
+    modelPath,
+    zoneConfigPath,
+    zoneId,
+    zoneNormalized,
+    zonePolygon,
+    confidenceThreshold,
+    iouThreshold,
+    frameStep,
+    imageSize,
+    personLabels,
+    minimumPresenceSeconds,
+  } = payload;
+
+  if (!fileExists(videoPath)) {
+    const error = new Error("Video path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!fileExists(modelPath)) {
+    const error = new Error("Model path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!fileExists(workingAtHeightScriptPath)) {
+    const error = new Error("Working at Height script not found.");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const jobId = `job-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const runId = `run-${Date.now()}`;
+  const outputDir = path.join(analysisOutputRoot, runId);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const resolvedZoneConfigPath = zonePolygon
+    ? path.join(outputDir, "zone.generated.json")
+    : zoneConfigPath || defaultRoiConfigPath;
+
+  if (zonePolygon) {
+    fs.writeFileSync(
+      resolvedZoneConfigPath,
+      JSON.stringify(
+        {
+          roi_id: zoneId || "working-at-height-zone",
+          normalized: zoneNormalized !== false,
+          polygon: zonePolygon,
+        },
+        null,
+        2
+      )
+    );
+  }
+  if (!zonePolygon && !fileExists(resolvedZoneConfigPath)) {
+    const error = new Error("Zone config path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const commandArgs = [
+    workingAtHeightScriptPath,
+    "--video-path",
+    videoPath,
+    "--roi-config-path",
+    resolvedZoneConfigPath,
+    "--output-dir",
+    outputDir,
+    "--model-path",
+    modelPath,
+    "--event-type",
+    "working_at_height",
+    "--finding-label",
+    "working at height",
+  ];
+
+  const appendNumberArg = (flag, value) => {
+    if (typeof value === "number") {
+      commandArgs.push(flag, String(value));
+    }
+  };
+
+  appendNumberArg("--confidence-threshold", confidenceThreshold);
+  appendNumberArg("--iou-threshold", iouThreshold);
+  appendNumberArg("--frame-step", frameStep);
+  appendNumberArg("--image-size", imageSize);
+  appendNumberArg("--minimum-presence-seconds", minimumPresenceSeconds);
+
+  (personLabels || []).forEach((label) => {
+    commandArgs.push("--person-label", label);
+  });
+
+  return {
+    id: jobId,
+    runId,
+    analysisType: "working_at_height",
+    moduleKey: "hse.working-at-height",
+    mediaSourceId: mediaSourceId || null,
+    videoPath,
+    outputDir,
+    commandArgs,
+    status: "queued",
+    message: "Job working at height masuk antrean dan menunggu worker.",
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    completedAt: null,
+    failedAt: null,
+    stdout: "",
+    stderr: "",
+    summary: null,
+    configSnapshot: payload,
+  };
+};
+
+const buildRedLightViolationAnalysisJob = (payload) => {
+  const {
+    mediaSourceId,
+    videoPath,
+    vehicleModelPath,
+    trafficLightModelPath,
+    stopLineConfigPath,
+    intersectionId,
+    stopLineNormalized,
+    stopLinePolygon,
+    confidenceThreshold,
+    iouThreshold,
+    frameStep,
+    imageSize,
+    vehicleLabels,
+    redLightLabels,
+    greenLightLabels,
+    crossingWindowSeconds,
+  } = payload;
+
+  if (!fileExists(videoPath)) {
+    const error = new Error("Video path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!fileExists(vehicleModelPath)) {
+    const error = new Error("Vehicle model path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!fileExists(trafficLightModelPath)) {
+    const error = new Error("Traffic light model path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!fileExists(redLightViolationScriptPath)) {
+    const error = new Error("Red Light Violation script not found.");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const jobId = `job-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const runId = `run-${Date.now()}`;
+  const outputDir = path.join(analysisOutputRoot, runId);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const resolvedStopLineConfigPath = stopLinePolygon
+    ? path.join(outputDir, "stop-line.generated.json")
+    : stopLineConfigPath || defaultRoiConfigPath;
+
+  if (stopLinePolygon) {
+    fs.writeFileSync(
+      resolvedStopLineConfigPath,
+      JSON.stringify(
+        {
+          roi_id: intersectionId || "mine-intersection-main",
+          normalized: stopLineNormalized !== false,
+          polygon: stopLinePolygon,
+        },
+        null,
+        2
+      )
+    );
+  }
+  if (!stopLinePolygon && !fileExists(resolvedStopLineConfigPath)) {
+    const error = new Error("Stop line config path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const commandArgs = [
+    redLightViolationScriptPath,
+    "--video-path",
+    videoPath,
+    "--roi-config-path",
+    resolvedStopLineConfigPath,
+    "--output-dir",
+    outputDir,
+    "--vehicle-model-path",
+    vehicleModelPath,
+    "--traffic-light-model-path",
+    trafficLightModelPath,
+    "--event-type",
+    "red_light_violation",
+    "--finding-label",
+    "red light violation",
+  ];
+
+  const appendNumberArg = (flag, value) => {
+    if (typeof value === "number") {
+      commandArgs.push(flag, String(value));
+    }
+  };
+
+  appendNumberArg("--confidence-threshold", confidenceThreshold);
+  appendNumberArg("--iou-threshold", iouThreshold);
+  appendNumberArg("--frame-step", frameStep);
+  appendNumberArg("--image-size", imageSize);
+  appendNumberArg("--crossing-window-seconds", crossingWindowSeconds);
+
+  (vehicleLabels || []).forEach((label) => {
+    commandArgs.push("--vehicle-label", label);
+  });
+  (redLightLabels || []).forEach((label) => {
+    commandArgs.push("--red-light-label", label);
+  });
+  (greenLightLabels || []).forEach((label) => {
+    commandArgs.push("--green-light-label", label);
+  });
+
+  return {
+    id: jobId,
+    runId,
+    analysisType: "red_light_violation",
+    moduleKey: "operations.red-light-violation",
+    mediaSourceId: mediaSourceId || null,
+    videoPath,
+    outputDir,
+    commandArgs,
+    status: "queued",
+    message: "Job red light violation masuk antrean dan menunggu worker.",
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    completedAt: null,
+    failedAt: null,
+    stdout: "",
+    stderr: "",
+    summary: null,
+    configSnapshot: payload,
+  };
+};
+
+const buildDumpTruckBedOpenAnalysisJob = (payload) => {
+  const {
+    mediaSourceId,
+    videoPath,
+    modelPath,
+    roiConfigPath,
+    roiId,
+    roiNormalized,
+    roiPolygon,
+    confidenceThreshold,
+    iouThreshold,
+    frameStep,
+    imageSize,
+    truckLabels,
+    bedOpenLabels,
+    bedClosedLabels,
+    movementThreshold,
+    minimumMovingSeconds,
+  } = payload;
+
+  if (!fileExists(videoPath)) {
+    const error = new Error("Video path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!fileExists(modelPath)) {
+    const error = new Error("Model path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!fileExists(dumpTruckBedOpenScriptPath)) {
+    const error = new Error("Dump Truck Bed Open script not found.");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const jobId = `job-${Date.now()}-${randomUUID().slice(0, 8)}`;
+  const runId = `run-${Date.now()}`;
+  const outputDir = path.join(analysisOutputRoot, runId);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const resolvedRoiConfigPath = roiPolygon
+    ? path.join(outputDir, "dump-truck-roi.generated.json")
+    : roiConfigPath || defaultRoiConfigPath;
+
+  if (roiPolygon) {
+    fs.writeFileSync(
+      resolvedRoiConfigPath,
+      JSON.stringify(
+        {
+          roi_id: roiId || "hauling-road-dump-truck",
+          normalized: roiNormalized !== false,
+          polygon: roiPolygon,
+        },
+        null,
+        2
+      )
+    );
+  }
+  if (!roiPolygon && !fileExists(resolvedRoiConfigPath)) {
+    const error = new Error("ROI config path not found.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const commandArgs = [
+    dumpTruckBedOpenScriptPath,
+    "--video-path",
+    videoPath,
+    "--roi-config-path",
+    resolvedRoiConfigPath,
+    "--output-dir",
+    outputDir,
+    "--model-path",
+    modelPath,
+    "--event-type",
+    "dump_truck_bed_open",
+    "--finding-label",
+    "dump truck bed open",
+  ];
+
+  const appendNumberArg = (flag, value) => {
+    if (typeof value === "number") {
+      commandArgs.push(flag, String(value));
+    }
+  };
+
+  appendNumberArg("--confidence-threshold", confidenceThreshold);
+  appendNumberArg("--iou-threshold", iouThreshold);
+  appendNumberArg("--frame-step", frameStep);
+  appendNumberArg("--image-size", imageSize);
+  appendNumberArg("--movement-threshold", movementThreshold);
+  appendNumberArg("--minimum-moving-seconds", minimumMovingSeconds);
+
+  (truckLabels || []).forEach((label) => {
+    commandArgs.push("--truck-label", label);
+  });
+  (bedOpenLabels || []).forEach((label) => {
+    commandArgs.push("--bed-open-label", label);
+  });
+  (bedClosedLabels || []).forEach((label) => {
+    commandArgs.push("--bed-closed-label", label);
+  });
+
+  return {
+    id: jobId,
+    runId,
+    analysisType: "dump_truck_bed_open",
+    moduleKey: "operations.dump-truck-bed-open",
+    mediaSourceId: mediaSourceId || null,
+    videoPath,
+    outputDir,
+    commandArgs,
+    status: "queued",
+    message: "Job dump truck bed open masuk antrean dan menunggu worker.",
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    completedAt: null,
+    failedAt: null,
+    stdout: "",
+    stderr: "",
+    summary: null,
+    configSnapshot: payload,
+  };
+};
 
 const executePpeAnalysisJob = async (job) => {
   job.status = "running";
@@ -2638,10 +3834,13 @@ app.get("/dashboard-summary/source/:id/latest-analysis", (req, res) => {
   const latestDetectionRun = getLatestDetectionRun(sourceRuns);
   const noHelmetRuns = sourceRuns.filter((run) => run.analysisType === "no_helmet");
   const noSafetyVestRuns = sourceRuns.filter((run) => run.analysisType === "no_safety_vest");
+  const noLifeVestRuns = sourceRuns.filter((run) => run.analysisType === "no_life_vest");
   const latestNoHelmetRun = noHelmetRuns[0] || null;
   const latestNoSafetyVestRun = noSafetyVestRuns[0] || null;
+  const latestNoLifeVestRun = noLifeVestRuns[0] || null;
   const latestNoHelmetDetectionRun = getLatestDetectionRun(noHelmetRuns);
   const latestNoSafetyVestDetectionRun = getLatestDetectionRun(noSafetyVestRuns);
+  const latestNoLifeVestDetectionRun = getLatestDetectionRun(noLifeVestRuns);
 
   return res.json({
     ok: true,
@@ -2661,10 +3860,12 @@ app.get("/dashboard-summary/source/:id/latest-analysis", (req, res) => {
     latestPpeByModule: {
       noHelmet: buildLatestAnalysisSummary(req, latestNoHelmetRun),
       noSafetyVest: buildLatestAnalysisSummary(req, latestNoSafetyVestRun),
+      noLifeVest: buildLatestAnalysisSummary(req, latestNoLifeVestRun),
     },
     latestDetectionByModule: {
       noHelmet: buildLatestAnalysisSummary(req, latestNoHelmetDetectionRun),
       noSafetyVest: buildLatestAnalysisSummary(req, latestNoSafetyVestDetectionRun),
+      noLifeVest: buildLatestAnalysisSummary(req, latestNoLifeVestDetectionRun),
     },
   });
 });
@@ -2685,6 +3886,63 @@ app.get("/analysis/no-helmet/defaults", (_req, res) => {
 
 app.get("/analysis/no-safety-vest/defaults", (_req, res) => {
   const resolved = resolveModuleConfigEnvelope("no-safety-vest");
+  res.json({
+    ok: true,
+    defaultModelPath: resolved?.ok ? resolved.resolvedModelPath : defaultModelPath,
+    defaultRoiConfigPath,
+    analysisOutputRoot,
+    serverPort: Number(PORT),
+    uploadRoot,
+    activeModel: resolved?.ok ? resolved.activeModel : null,
+    modelSource: resolved?.ok && resolved.usesDeploymentGate ? "deployment-gate" : "manual",
+  });
+});
+
+app.get("/analysis/no-life-vest/defaults", (_req, res) => {
+  const resolved = resolveModuleConfigEnvelope("no-life-vest");
+  res.json({
+    ok: true,
+    defaultModelPath: resolved?.ok ? resolved.resolvedModelPath : defaultModelPath,
+    defaultRoiConfigPath,
+    analysisOutputRoot,
+    serverPort: Number(PORT),
+    uploadRoot,
+    activeModel: resolved?.ok ? resolved.activeModel : null,
+    modelSource: resolved?.ok && resolved.usesDeploymentGate ? "deployment-gate" : "manual",
+  });
+});
+
+app.get("/analysis/working-at-height/defaults", (_req, res) => {
+  const resolved = resolveModuleConfigEnvelope("working-at-height");
+  res.json({
+    ok: true,
+    defaultModelPath: resolved?.ok ? resolved.resolvedModelPath : defaultModelPath,
+    defaultZoneConfigPath: defaultRoiConfigPath,
+    analysisOutputRoot,
+    serverPort: Number(PORT),
+    uploadRoot,
+    activeModel: resolved?.ok ? resolved.activeModel : null,
+    modelSource: resolved?.ok && resolved.usesDeploymentGate ? "deployment-gate" : "manual",
+  });
+});
+
+app.get("/analysis/red-light-violation/defaults", (_req, res) => {
+  const resolved = resolveModuleConfigEnvelope("red-light-violation");
+  res.json({
+    ok: true,
+    defaultVehicleModelPath: resolved?.ok ? resolved.config.vehicleModelPath : defaultModelPath,
+    defaultTrafficLightModelPath: resolved?.ok ? resolved.config.trafficLightModelPath : defaultModelPath,
+    defaultStopLineConfigPath: defaultRoiConfigPath,
+    analysisOutputRoot,
+    serverPort: Number(PORT),
+    uploadRoot,
+    activeModel: resolved?.ok ? resolved.activeModel : null,
+    modelSource: resolved?.ok && resolved.usesDeploymentGate ? "deployment-gate" : "manual",
+  });
+});
+
+app.get("/analysis/dump-truck-bed-open/defaults", (_req, res) => {
+  const resolved = resolveModuleConfigEnvelope("dump-truck-bed-open");
   res.json({
     ok: true,
     defaultModelPath: resolved?.ok ? resolved.resolvedModelPath : defaultModelPath,
@@ -3043,6 +4301,93 @@ app.patch("/models/evaluations/:id", (req, res) => {
   });
 });
 
+app.get("/models/benchmarks", (_req, res) => {
+  return res.json({
+    ok: true,
+    items: readModelBenchmarks().sort(
+      (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+    ),
+  });
+});
+
+app.post("/models/benchmarks", (req, res) => {
+  const parsed = createModelBenchmarkPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid model benchmark payload.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const datasets = readModelDatasets();
+  const dataset = datasets.find((item) => item.id === parsed.data.datasetId);
+  if (!dataset) {
+    return res.status(404).json({ ok: false, message: "Dataset not found." });
+  }
+
+  const modelVersions = readModelVersions();
+  const modelVersion = modelVersions.find((item) => item.id === parsed.data.modelVersionId);
+  if (!modelVersion) {
+    return res.status(404).json({ ok: false, message: "Model version not found." });
+  }
+
+  const now = new Date().toISOString();
+  const item = {
+    id: `benchmark-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    datasetId: dataset.id,
+    datasetName: dataset.name,
+    modelVersionId: modelVersion.id,
+    modelName: modelVersion.name,
+    moduleKey: modelVersion.moduleKey,
+    domain: modelVersion.domain,
+    ...parsed.data,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const items = readModelBenchmarks();
+  items.unshift(item);
+  writeModelBenchmarks(items);
+
+  return res.status(201).json({
+    ok: true,
+    item,
+    overview: buildModelsOverview(),
+  });
+});
+
+app.patch("/models/benchmarks/:id", (req, res) => {
+  const parsed = updateModelBenchmarkPayloadSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid model benchmark update payload.",
+      errors: parsed.error.flatten(),
+    });
+  }
+
+  const items = readModelBenchmarks();
+  const index = items.findIndex((item) => item.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ ok: false, message: "Model benchmark not found." });
+  }
+
+  const updated = {
+    ...items[index],
+    ...parsed.data,
+    updatedAt: new Date().toISOString(),
+  };
+  items[index] = updated;
+  writeModelBenchmarks(items);
+
+  return res.json({
+    ok: true,
+    item: updated,
+    overview: buildModelsOverview(),
+  });
+});
+
 app.get("/analysis/hse-safety-rules/source/:id/latest", (req, res) => {
   const mediaSources = readMediaRegistry();
   const source = mediaSources.find((item) => item.id === req.params.id);
@@ -3212,6 +4557,166 @@ app.get("/analysis/no-safety-vest/jobs/:id", (req, res) => {
   return res.json(sanitizeAnalysisJobForResponse(req, job));
 });
 
+app.post("/analysis/no-life-vest", async (req, res) => {
+  try {
+    const parsed = noLifeVestPayloadSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid analysis payload",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const job = enqueueAnalysisJob(buildNoLifeVestAnalysisJob(parsed.data));
+    return res.status(202).json({
+      ok: true,
+      jobId: job.id,
+      status: job.status,
+      message: job.message,
+      runId: job.runId,
+      outputDir: job.outputDir,
+      createdAt: job.createdAt,
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || 500).json({
+      ok: false,
+      message: error?.message || "Analysis failed",
+      stdout: error?.stdout || "",
+      stderr: error?.stderr || "",
+    });
+  }
+});
+
+app.get("/analysis/no-life-vest/jobs/:id", (req, res) => {
+  const job = analysisJobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({ ok: false, message: "Analysis job not found." });
+  }
+
+  return res.json(sanitizeAnalysisJobForResponse(req, job));
+});
+
+app.post("/analysis/working-at-height", async (req, res) => {
+  try {
+    const parsed = workingAtHeightPayloadSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid analysis payload",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const job = enqueueAnalysisJob(buildWorkingAtHeightAnalysisJob(parsed.data));
+    return res.status(202).json({
+      ok: true,
+      jobId: job.id,
+      status: job.status,
+      message: job.message,
+      runId: job.runId,
+      outputDir: job.outputDir,
+      createdAt: job.createdAt,
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || 500).json({
+      ok: false,
+      message: error?.message || "Analysis failed",
+      stdout: error?.stdout || "",
+      stderr: error?.stderr || "",
+    });
+  }
+});
+
+app.get("/analysis/working-at-height/jobs/:id", (req, res) => {
+  const job = analysisJobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({ ok: false, message: "Analysis job not found." });
+  }
+
+  return res.json(sanitizeAnalysisJobForResponse(req, job));
+});
+
+app.post("/analysis/red-light-violation", async (req, res) => {
+  try {
+    const parsed = redLightViolationPayloadSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid analysis payload",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const job = enqueueAnalysisJob(buildRedLightViolationAnalysisJob(parsed.data));
+    return res.status(202).json({
+      ok: true,
+      jobId: job.id,
+      status: job.status,
+      message: job.message,
+      runId: job.runId,
+      outputDir: job.outputDir,
+      createdAt: job.createdAt,
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || 500).json({
+      ok: false,
+      message: error?.message || "Analysis failed",
+      stdout: error?.stdout || "",
+      stderr: error?.stderr || "",
+    });
+  }
+});
+
+app.get("/analysis/red-light-violation/jobs/:id", (req, res) => {
+  const job = analysisJobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({ ok: false, message: "Analysis job not found." });
+  }
+
+  return res.json(sanitizeAnalysisJobForResponse(req, job));
+});
+
+app.post("/analysis/dump-truck-bed-open", async (req, res) => {
+  try {
+    const parsed = dumpTruckBedOpenPayloadSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        ok: false,
+        message: "Invalid analysis payload",
+        errors: parsed.error.flatten(),
+      });
+    }
+
+    const job = enqueueAnalysisJob(buildDumpTruckBedOpenAnalysisJob(parsed.data));
+    return res.status(202).json({
+      ok: true,
+      jobId: job.id,
+      status: job.status,
+      message: job.message,
+      runId: job.runId,
+      outputDir: job.outputDir,
+      createdAt: job.createdAt,
+    });
+  } catch (error) {
+    return res.status(error?.statusCode || 500).json({
+      ok: false,
+      message: error?.message || "Analysis failed",
+      stdout: error?.stdout || "",
+      stderr: error?.stderr || "",
+    });
+  }
+});
+
+app.get("/analysis/dump-truck-bed-open/jobs/:id", (req, res) => {
+  const job = analysisJobs.get(req.params.id);
+  if (!job) {
+    return res.status(404).json({ ok: false, message: "Analysis job not found." });
+  }
+
+  return res.json(sanitizeAnalysisJobForResponse(req, job));
+});
+
 app.get("/module-configs/:moduleKey", (req, res) => {
   if (!moduleConfigSchemas[req.params.moduleKey]) {
     return res.status(404).json({ ok: false, message: "Module config not found." });
@@ -3356,8 +4861,17 @@ app.post("/sync", async (req, res) => {
   }
 });
 
-app.listen(Number(PORT), () => {
-  console.log(`Local analysis server running on port ${PORT}`);
+const server = app.listen(Number(PORT), HOST, () => {
+  console.log(`Local analysis server running on http://${HOST}:${PORT}`);
   refreshMonitoringRuntime();
   setInterval(refreshMonitoringRuntime, LIVE_MONITORING_POLL_INTERVAL_MS);
+});
+
+server.on("error", (error) => {
+  console.error(
+    `[startup] Failed to bind local analysis server on http://${HOST}:${PORT}: ${
+      error?.message || error
+    }`
+  );
+  process.exit(1);
 });

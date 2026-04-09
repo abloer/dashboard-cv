@@ -35,8 +35,11 @@ export default function NoSafetyVestSetup() {
       },
       {
         label: "Label Mapping",
-        ready: config.vestLabels.trim().length > 0 && config.violationLabels.trim().length > 0,
-        detail: `${config.vestLabels || "--"} | ${config.violationLabels || "--"}`,
+        ready: config.vestLabels.trim().length > 0,
+        detail:
+          config.violationLabels.trim().length > 0
+            ? `${config.vestLabels || "--"} | ${config.violationLabels || "--"}`
+            : `${config.vestLabels || "--"} | matching only`,
       },
       {
         label: "Rule Smoothing",

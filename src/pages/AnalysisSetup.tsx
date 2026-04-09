@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ArrowRight, Briefcase, HardHat, ShieldCheck, Users } from "lucide-react";
+import { ArrowRight, Briefcase, HardHat, ShieldCheck, TrafficCone, Users } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Header } from "@/components/layout/Header";
@@ -28,6 +28,12 @@ const CATEGORY_CARDS = [
         href: "/no-safety-vest-setup",
         status: "active" as const,
       },
+      {
+        name: "No Life Vest",
+        description: "Konfigurasi awal untuk inspeksi pelampung/life vest di area air atau ponton.",
+        href: "/no-life-vest-setup",
+        status: "active" as const,
+      },
     ],
   },
   {
@@ -42,19 +48,31 @@ const CATEGORY_CARDS = [
         href: "/safety-rules-setup",
         status: "active" as const,
       },
+      {
+        name: "Working at Height",
+        description: "Baseline zone-based assessment untuk aktivitas bekerja di area ketinggian.",
+        href: "/working-at-height-setup",
+        status: "active" as const,
+      },
     ],
   },
   {
     key: "Operations",
     title: "Operations",
-    description: "Kategori analisis untuk aktivitas area dan visibilitas personel.",
-    icon: Users,
+    description: "Kategori analisis untuk keselamatan kendaraan, persimpangan, dan kondisi alat angkut di area tambang.",
+    icon: TrafficCone,
     modules: [
       {
-        name: "People Count",
-        description: "Placeholder untuk hitung jumlah orang.",
-        href: "",
-        status: "planned" as const,
+        name: "Red Light Violation",
+        description: "Konfigurasi baseline untuk pelanggaran lampu merah di persimpangan tambang dan hauling road.",
+        href: "/red-light-violation-setup",
+        status: "active" as const,
+      },
+      {
+        name: "Dump Truck Bed Open",
+        description: "Konfigurasi baseline untuk dump truck yang bergerak dengan bak masih terbuka.",
+        href: "/dump-truck-bed-open-setup",
+        status: "active" as const,
       },
     ],
   },

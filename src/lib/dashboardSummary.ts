@@ -26,13 +26,13 @@ export interface DashboardSourceSummary {
   latestViolatorCount: number;
   latestOutputDir: string | null;
   latestSnapshotUrl: string | null;
-  latestAnalysisType: "no_helmet" | "no_safety_vest" | null;
+  latestAnalysisType: "no_helmet" | "no_safety_vest" | "no_life_vest" | null;
   hasActiveAlert: boolean;
 }
 
 export interface DashboardRecentRun {
   id: string;
-  analysisType: "no_helmet" | "no_safety_vest";
+  analysisType: "no_helmet" | "no_safety_vest" | "no_life_vest";
   mediaSourceId: string | null;
   sourceName: string;
   location: string | null;
@@ -47,7 +47,7 @@ export interface DashboardRecentRun {
 
 export interface DashboardLatestAnalysisSummary {
   id: string;
-  analysisType: "no_helmet" | "no_safety_vest";
+  analysisType: "no_helmet" | "no_safety_vest" | "no_life_vest";
   mediaSourceId: string | null;
   sourceName: string;
   location: string | null;
@@ -120,10 +120,12 @@ interface DashboardSourceLatestSummaryResponse {
   latestPpeByModule: {
     noHelmet: DashboardLatestAnalysisSummary | null;
     noSafetyVest: DashboardLatestAnalysisSummary | null;
+    noLifeVest: DashboardLatestAnalysisSummary | null;
   };
   latestDetectionByModule: {
     noHelmet: DashboardLatestAnalysisSummary | null;
     noSafetyVest: DashboardLatestAnalysisSummary | null;
+    noLifeVest: DashboardLatestAnalysisSummary | null;
   };
 }
 

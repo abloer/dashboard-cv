@@ -1,12 +1,21 @@
 import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
 
-export type ModelDatasetDomain = "PPE" | "HSE";
+export type ModelDatasetDomain = "PPE" | "HSE" | "Operations";
 export type ModelDatasetStatus = "draft" | "ready" | "archived";
 export type ModelDatasetSourceType = "upload" | "camera" | "mixed";
 export type ModelTrainingJobStatus = "queued" | "running" | "completed" | "failed";
-export type ModelTargetModule = "ppe.no-helmet" | "ppe.no-safety-vest" | "hse.safety-rules";
+export type ModelTargetModule =
+  | "ppe.no-helmet"
+  | "ppe.no-safety-vest"
+  | "ppe.no-life-vest"
+  | "hse.safety-rules"
+  | "hse.working-at-height"
+  | "operations.red-light-violation"
+  | "operations.dump-truck-bed-open";
 export type ModelVersionStatus = "candidate" | "approved" | "active" | "rejected";
 export type ModelEvaluationStatus = "draft" | "reviewed" | "approved" | "rejected";
+export type ModelBenchmarkStatus = "draft" | "reviewed" | "approved";
+export type ModelBenchmarkRecommendation = "keep-current" | "replace-model" | "fine-tune";
 
 export interface ModelDataset {
   id: string;
@@ -36,6 +45,7 @@ export interface ModelsOverview {
   domainSplit: {
     PPE: number;
     HSE: number;
+    Operations: number;
   };
   activeModelsByModule: Array<{
     id: string;
@@ -95,6 +105,26 @@ export interface ModelEvaluation {
   map50: number | null;
   falsePositiveNotes: string;
   falseNegativeNotes: string;
+  benchmarkNotes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelBenchmark {
+  id: string;
+  datasetId: string;
+  datasetName: string;
+  modelVersionId: string;
+  modelName: string;
+  moduleKey: ModelTargetModule;
+  domain: ModelDatasetDomain;
+  baselineModelPath: string;
+  recommendation: ModelBenchmarkRecommendation;
+  status: ModelBenchmarkStatus;
+  precisionDelta: number | null;
+  recallDelta: number | null;
+  falsePositiveDelta: number | null;
+  falseNegativeDelta: number | null;
   benchmarkNotes: string;
   createdAt: string;
   updatedAt: string;
@@ -165,6 +195,30 @@ export interface UpdateModelVersionPayload {
   status: ModelVersionStatus;
 }
 
+export interface CreateModelBenchmarkPayload {
+  datasetId: string;
+  modelVersionId: string;
+  baselineModelPath: string;
+  recommendation: ModelBenchmarkRecommendation;
+  status: ModelBenchmarkStatus;
+  precisionDelta: number | null;
+  recallDelta: number | null;
+  falsePositiveDelta: number | null;
+  falseNegativeDelta: number | null;
+  benchmarkNotes: string;
+}
+
+export interface UpdateModelBenchmarkPayload {
+  baselineModelPath?: string;
+  recommendation?: ModelBenchmarkRecommendation;
+  status?: ModelBenchmarkStatus;
+  precisionDelta?: number | null;
+  recallDelta?: number | null;
+  falsePositiveDelta?: number | null;
+  falseNegativeDelta?: number | null;
+  benchmarkNotes?: string;
+}
+
 interface ModelsOverviewResponse {
   ok: boolean;
   overview: ModelsOverview;
@@ -205,6 +259,17 @@ interface ModelEvaluationsResponse {
 interface ModelEvaluationMutationResponse {
   ok: boolean;
   item: ModelEvaluation;
+  overview: ModelsOverview;
+}
+
+interface ModelBenchmarksResponse {
+  ok: boolean;
+  items: ModelBenchmark[];
+}
+
+interface ModelBenchmarkMutationResponse {
+  ok: boolean;
+  item: ModelBenchmark;
   overview: ModelsOverview;
 }
 
@@ -327,4 +392,32 @@ export async function updateModelEvaluation(id: string, payload: UpdateModelEval
     body: JSON.stringify(payload),
   });
   return parseResponse<ModelEvaluationMutationResponse>(response);
+}
+
+export async function getModelBenchmarks(): Promise<ModelBenchmark[]> {
+  const response = await fetch(`${analysisServerBaseUrl}/models/benchmarks`);
+  const payload = await parseResponse<ModelBenchmarksResponse>(response);
+  return payload.items;
+}
+
+export async function createModelBenchmark(payload: CreateModelBenchmarkPayload) {
+  const response = await fetch(`${analysisServerBaseUrl}/models/benchmarks`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<ModelBenchmarkMutationResponse>(response);
+}
+
+export async function updateModelBenchmark(id: string, payload: UpdateModelBenchmarkPayload) {
+  const response = await fetch(`${analysisServerBaseUrl}/models/benchmarks/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  return parseResponse<ModelBenchmarkMutationResponse>(response);
 }

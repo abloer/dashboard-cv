@@ -14,7 +14,11 @@ import AnalysisSetup from "./pages/AnalysisSetup";
 import RunAnalysis from "./pages/RunAnalysis";
 import NoHelmetSetup from "./pages/NoHelmetSetup";
 import NoSafetyVestSetup from "./pages/NoSafetyVestSetup";
+import NoLifeVestSetup from "./pages/NoLifeVestSetup";
 import SafetyRulesSetup from "./pages/SafetyRulesSetup";
+import WorkingAtHeightSetup from "./pages/WorkingAtHeightSetup";
+import RedLightViolationSetup from "./pages/RedLightViolationSetup";
+import DumpTruckBedOpenSetup from "./pages/DumpTruckBedOpenSetup";
 import HseSafetyRulesRun from "./pages/HseSafetyRulesRun";
 import Models from "./pages/Models";
 import LiveMonitoring from "./pages/LiveMonitoring";
@@ -35,11 +39,20 @@ const App = () => (
             <Route path="/run-analysis" element={<RunAnalysis />} />
             <Route path="/no-helmet-setup" element={<NoHelmetSetup />} />
             <Route path="/no-safety-vest-setup" element={<NoSafetyVestSetup />} />
+            <Route path="/no-life-vest-setup" element={<NoLifeVestSetup />} />
             <Route path="/safety-rules-setup" element={<SafetyRulesSetup />} />
+            <Route path="/working-at-height-setup" element={<WorkingAtHeightSetup />} />
+            <Route path="/red-light-violation-setup" element={<RedLightViolationSetup />} />
+            <Route path="/dump-truck-bed-open-setup" element={<DumpTruckBedOpenSetup />} />
             <Route path="/hse-safety-rules-run" element={<HseSafetyRulesRun />} />
             <Route path="/no-helmet-analysis" element={<NoHelmetAnalysis />} />
             <Route path="/live-monitoring" element={<LiveMonitoring />} />
             <Route path="/models" element={<Models />} />
+            <Route path="/models/datasets" element={<Models />} />
+            <Route path="/models/training-jobs" element={<Models />} />
+            <Route path="/models/evaluation" element={<Models />} />
+            <Route path="/models/benchmarks" element={<Models />} />
+            <Route path="/models/deployment-gate" element={<Models />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/settings" element={<Settings />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

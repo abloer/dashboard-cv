@@ -1,5 +1,104 @@
 [
   {
+    "id": "model-version-operations-dump-truck-default",
+    "name": "Dump Truck Operations Baseline",
+    "moduleKey": "operations.dump-truck-bed-open",
+    "domain": "Operations",
+    "labels": [
+      "dump-truck",
+      "bed-open",
+      "bed-closed"
+    ],
+    "modelPath": "/Users/abloer/my_project/dashboard-cv-ut/models/yolo11l.pt",
+    "sourceJobId": null,
+    "evaluationSummary": "Baseline umum Operations berbasis detector kendaraan resmi Ultralytics. Dipakai sebagai starting point modul dump truck sebelum model state bak terbuka/tertutup khusus tersedia.",
+    "status": "active",
+    "createdAt": "2026-04-06T12:29:46.750Z",
+    "updatedAt": "2026-04-06T12:29:46.750Z"
+  },
+  {
+    "id": "model-version-operations-red-light-default",
+    "name": "Operations General Baseline",
+    "moduleKey": "operations.red-light-violation",
+    "domain": "Operations",
+    "labels": [
+      "vehicle",
+      "red-light",
+      "green-light"
+    ],
+    "modelPath": "/Users/abloer/my_project/dashboard-cv-ut/models/yolo11l.pt",
+    "sourceJobId": null,
+    "evaluationSummary": "Baseline umum Operations berbasis detector kendaraan dan traffic light resmi Ultralytics. Dipakai sebagai starting point untuk red light violation sebelum model domain tambang yang lebih spesifik tersedia.",
+    "status": "active",
+    "createdAt": "2026-04-06T12:29:46.750Z",
+    "updatedAt": "2026-04-06T12:29:46.750Z"
+  },
+  {
+    "id": "model-version-hse-working-at-height-default",
+    "name": "Working at Height Baseline",
+    "moduleKey": "hse.working-at-height",
+    "domain": "HSE",
+    "labels": [
+      "person"
+    ],
+    "modelPath": "/Users/abloer/my_project/dashboard-cv-ut/models/life-vest-baseline.pt",
+    "sourceJobId": null,
+    "evaluationSummary": "Baseline awal untuk modul working at height berbasis detector person dan zone area ketinggian.",
+    "status": "active",
+    "createdAt": "2026-04-06T12:29:46.750Z",
+    "updatedAt": "2026-04-06T12:29:46.750Z"
+  },
+  {
+    "id": "model-version-hse-safety-rules-default",
+    "name": "Safety Rules Baseline",
+    "moduleKey": "hse.safety-rules",
+    "domain": "HSE",
+    "labels": [
+      "person",
+      "vehicle",
+      "hardhat",
+      "safety-vest"
+    ],
+    "modelPath": "/Users/abloer/my_project/dashboard-cv-ut/models/detect-construction-safety-best.pt",
+    "sourceJobId": null,
+    "evaluationSummary": "Baseline policy HSE yang memakai evidence PPE/HSE default sebelum kandidat model khusus diaktifkan.",
+    "status": "active",
+    "createdAt": "2026-04-06T12:29:46.750Z",
+    "updatedAt": "2026-04-06T12:29:46.750Z"
+  },
+  {
+    "id": "model-version-ppe-no-life-vest-default",
+    "name": "Life Vest Baseline",
+    "moduleKey": "ppe.no-life-vest",
+    "domain": "PPE",
+    "labels": [
+      "person",
+      "life-vest"
+    ],
+    "modelPath": "/Users/abloer/my_project/dashboard-cv-ut/models/detect-construction-safety-best.pt",
+    "sourceJobId": null,
+    "evaluationSummary": "Baseline awal terpisah untuk modul pelampung/life vest. Path model ini disiapkan khusus agar dapat diganti dengan model life vest domain perairan melalui Training Jobs dan Deployment Gate.",
+    "status": "active",
+    "createdAt": "2026-04-06T12:29:46.750Z",
+    "updatedAt": "2026-04-06T12:29:46.750Z"
+  },
+  {
+    "id": "model-version-ppe-no-safety-vest-default",
+    "name": "Safety Vest Baseline",
+    "moduleKey": "ppe.no-safety-vest",
+    "domain": "PPE",
+    "labels": [
+      "person",
+      "safety-vest"
+    ],
+    "modelPath": "/Users/abloer/my_project/dashboard-cv-ut/models/detect-construction-safety-best.pt",
+    "sourceJobId": null,
+    "evaluationSummary": "Baseline awal untuk modul rompi keselamatan. Disarankan diganti dengan model vest khusus melalui Training Jobs dan Deployment Gate.",
+    "status": "active",
+    "createdAt": "2026-04-06T12:29:46.750Z",
+    "updatedAt": "2026-04-06T12:29:46.750Z"
+  },
+  {
     "id": "model-version-ppe-no-helmet-default",
     "name": "Construction Safety Baseline",
     "moduleKey": "ppe.no-helmet",
@@ -11,9 +110,9 @@
     ],
     "modelPath": "/Users/abloer/my_project/dashboard-cv-ut/models/detect-construction-safety-best.pt",
     "sourceJobId": null,
-    "evaluationSummary": "Baseline model komunitas yang saat ini dipakai untuk inference PPE.",
+    "evaluationSummary": "Baseline model komunitas yang saat ini dipakai untuk inference PPE helmet pada area konstruksi.",
     "status": "active",
-    "createdAt": "2026-03-26T06:13:41.703Z",
-    "updatedAt": "2026-03-26T06:13:41.703Z"
+    "createdAt": "2026-04-06T12:29:46.750Z",
+    "updatedAt": "2026-04-06T12:29:46.750Z"
   }
 ]

@@ -3,7 +3,11 @@ export type AnalysisFindingCategory = "PPE" | "HSE" | "Operations" | "Fleet & KP
 export type AnalysisFindingModuleKey =
   | "ppe.no-helmet"
   | "ppe.no-safety-vest"
+  | "ppe.no-life-vest"
   | "hse.safety-rules"
+  | "hse.working-at-height"
+  | "operations.red-light-violation"
+  | "operations.dump-truck-bed-open"
   | "operations.people-count"
   | "fleet.kpi";
 
@@ -96,7 +100,11 @@ export const buildFindingsAggregate = (
 export const moduleKeyLabel: Record<string, string> = {
   "ppe.no-helmet": "PPE • No Helmet",
   "ppe.no-safety-vest": "PPE • No Safety Vest",
+  "ppe.no-life-vest": "PPE • No Life Vest",
   "hse.safety-rules": "HSE • Safety Rules",
+  "hse.working-at-height": "HSE • Working at Height",
+  "operations.red-light-violation": "Operations • Red Light Violation",
+  "operations.dump-truck-bed-open": "Operations • Dump Truck Bed Open",
   "operations.people-count": "Operations • People Count",
   "fleet.kpi": "Fleet & KPI",
 };

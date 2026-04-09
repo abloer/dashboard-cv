@@ -1,27 +1,45 @@
 [
   {
-    "id": "media-2624229d-1945-4e85-8b03-dbd682ebf898",
-    "name": "Sumber artha",
-    "location": "Sumber artha",
-    "source": "https://eofficev2.bekasikota.go.id/backupcctv/m3/Putaran_sumber_Arta.m3u8",
-    "type": "camera",
+    "id": "media-136598d5-49e5-4128-ac61-b902035cbb0d",
+    "name": "Sampel Video DT Violation",
+    "location": "Area DumpTruck",
+    "source": "/Users/abloer/my_project/dashboard-cv-ut/runtime-analysis/uploads/1775559637390-NVR-BC-GMO_CP-POS-DUMPING_NVR-BC-GMO_20260312141232_20260312141526_547679328.mp4",
+    "type": "upload",
     "status": "active",
     "analytics": [
-      "PPE"
+      "Operations"
     ],
-    "executionMode": "continuous",
-    "monitoringStatus": "paused",
+    "executionMode": "manual",
+    "monitoringStatus": "idle",
     "monitoringIntervalSeconds": null,
     "note": "",
-    "lastSeen": "Monitoring dijeda",
-    "createdAt": "2026-03-26T08:53:02.797Z",
-    "updatedAt": "2026-03-26T10:23:01.351Z"
+    "lastSeen": "NVR BC GMO_CP-POS DUMPING_NVR BC GMO_20260312141232_20260312141526_547679328.mp4 uploaded",
+    "createdAt": "2026-04-07T11:00:37.515Z",
+    "updatedAt": "2026-04-07T11:00:37.515Z"
   },
   {
-    "id": "media-6bc8d83c-3aae-4c66-8bd6-1f6a070eae74",
-    "name": "Sample Video 4",
-    "location": "Sample Video 4",
-    "source": "/Users/abloer/my_project/dashboard-cv-ut/runtime-analysis/uploads/1774407749023-Construction-site-of-subway-MBro-Wireless-CCTV-Live-Video.mp4",
+    "id": "media-9c5832a8-febd-4fb2-b46f-1de2b19349b3",
+    "name": "Sampel Video 2",
+    "location": "Vehicle Sampel Video 2",
+    "source": "/Users/abloer/my_project/dashboard-cv-ut/runtime-analysis/uploads/1775479285165-The_Vehicle_-_Equipment_State_Detector_2.mp4",
+    "type": "upload",
+    "status": "active",
+    "analytics": [
+      "Operations"
+    ],
+    "executionMode": "manual",
+    "monitoringStatus": "idle",
+    "monitoringIntervalSeconds": null,
+    "note": "",
+    "lastSeen": "The_Vehicle_&_Equipment_State_Detector_2.mp4 uploaded",
+    "createdAt": "2026-04-06T12:41:25.289Z",
+    "updatedAt": "2026-04-06T12:41:25.289Z"
+  },
+  {
+    "id": "media-561b0017-a123-48c9-8f80-d32306714d75",
+    "name": "Sampel Video 1",
+    "location": "Outdoor Sampel Video 1",
+    "source": "/Users/abloer/my_project/dashboard-cv-ut/runtime-analysis/uploads/1775478582352-Project-Area-Outdoor.mp4",
     "type": "upload",
     "status": "active",
     "analytics": [
@@ -31,66 +49,9 @@
     "executionMode": "manual",
     "monitoringStatus": "idle",
     "monitoringIntervalSeconds": null,
-    "note": "Sample Video 4",
-    "lastSeen": "Construction site of subway MBro Wireless CCTV Live Video.mp4 uploaded",
-    "createdAt": "2026-03-25T03:02:29.261Z",
-    "updatedAt": "2026-03-25T03:02:29.261Z"
-  },
-  {
-    "id": "media-8392ac42-e584-4375-922c-e1353aa23ec9",
-    "name": "Sample Video 3",
-    "location": "Sample Video 3",
-    "source": "/Users/abloer/my_project/dashboard-cv-ut/runtime-analysis/uploads/1774406926251-indianworkers.mp4",
-    "type": "upload",
-    "status": "active",
-    "analytics": [
-      "PPE",
-      "HSE"
-    ],
-    "executionMode": "manual",
-    "monitoringStatus": "idle",
-    "monitoringIntervalSeconds": null,
-    "note": "Sample Video 3",
-    "lastSeen": "indianworkers.mp4 uploaded",
-    "createdAt": "2026-03-25T02:48:46.370Z",
-    "updatedAt": "2026-03-25T02:48:46.370Z"
-  },
-  {
-    "id": "media-14af228d-97c1-4373-b7b6-d5dddf61b9a8",
-    "name": "Sample Video 2",
-    "location": "Sample Video 2",
-    "source": "/Users/abloer/my_project/dashboard-cv-ut/runtime-analysis/uploads/1774406875806-YTDown.com_YouTube_PPE-monitoring-Safety-Helmet_Media_cKAyUL6MJGc_001_360p.mp4",
-    "type": "upload",
-    "status": "active",
-    "analytics": [
-      "PPE",
-      "HSE"
-    ],
-    "executionMode": "manual",
-    "monitoringStatus": "idle",
-    "monitoringIntervalSeconds": null,
-    "note": "Sample Video 2",
-    "lastSeen": "YTDown.com_YouTube_PPE-monitoring-Safety-Helmet_Media_cKAyUL6MJGc_001_360p.mp4 uploaded",
-    "createdAt": "2026-03-25T02:47:55.906Z",
-    "updatedAt": "2026-03-25T02:47:55.906Z"
-  },
-  {
-    "id": "media-77b0a552-2aa5-4af2-b6fb-7b4f3be35581",
-    "name": "Sample Video 1",
-    "location": "Outdoor Area",
-    "source": "/Users/abloer/my_project/dashboard-cv-ut/runtime-analysis/uploads/1774856843540-Project-Area-Outdoor.mp4",
-    "type": "upload",
-    "status": "active",
-    "analytics": [
-      "PPE",
-      "HSE"
-    ],
-    "executionMode": "manual",
-    "monitoringStatus": "idle",
-    "monitoringIntervalSeconds": null,
-    "note": "Sample Video 1",
+    "note": "",
     "lastSeen": "Project Area Outdoor.mp4 uploaded",
-    "createdAt": "2026-03-18T01:07:13.463Z",
-    "updatedAt": "2026-03-30T07:47:23.697Z"
+    "createdAt": "2026-04-06T12:29:42.576Z",
+    "updatedAt": "2026-04-06T12:29:42.576Z"
   }
 ]
