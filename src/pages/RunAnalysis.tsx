@@ -103,6 +103,14 @@ import {
   moduleKeyLabel,
   type AnalysisFinding,
 } from "@/lib/analysisFindings";
+import {
+  generateHseNarrative,
+  generateOperatorIncidentSummary,
+  getAiAssistConfig,
+  verifyNeedsReviewFinding,
+  type NeedsReviewAiVerdict,
+  type OperatorIncidentAiSummary,
+} from "@/lib/aiAssist";
 import { COMMUNITY_DEMO_PRESET, STRICT_DISTANCE_PRESET, readNoHelmetConfig } from "@/lib/noHelmetConfig";
 import { readNoSafetyVestConfig } from "@/lib/noSafetyVestConfig";
 import { readNoLifeVestConfig } from "@/lib/noLifeVestConfig";
@@ -833,6 +841,13 @@ export default function RunAnalysis() {
   const [redLightSummary, setRedLightSummary] = useState<RedLightViolationAnalysisSummary | null>(null);
   const [dumpTruckSummary, setDumpTruckSummary] = useState<DumpTruckBedOpenAnalysisSummary | null>(null);
   const [hseReport, setHseReport] = useState<HseSafetyRulesReport | null>(null);
+  const [aiAssistEnabled, setAiAssistEnabled] = useState(false);
+  const [aiNeedsReviewResults, setAiNeedsReviewResults] = useState<Record<string, NeedsReviewAiVerdict>>({});
+  const [aiIncidentSummaries, setAiIncidentSummaries] = useState<Record<string, OperatorIncidentAiSummary>>({});
+  const [aiVerifyingFindingIds, setAiVerifyingFindingIds] = useState<Record<string, boolean>>({});
+  const [aiSummarizingFindingIds, setAiSummarizingFindingIds] = useState<Record<string, boolean>>({});
+  const [aiHseNarrative, setAiHseNarrative] = useState("");
+  const [isGeneratingAiHseNarrative, setIsGeneratingAiHseNarrative] = useState(false);
   const [defaultHseConfig, setDefaultHseConfig] = useState<HseSafetyRulesReport["configSnapshot"] | null>(null);
   const [outputDir, setOutputDir] = useState("");
   const [serverDefaults, setServerDefaults] = useState<{
@@ -986,6 +1001,32 @@ export default function RunAnalysis() {
   const sourceSupportsPpe = selectedSource?.analytics.includes("PPE") ?? false;
   const sourceSupportsHse = selectedSource?.analytics.includes("HSE") ?? false;
   const sourceSupportsOperations = selectedSource?.analytics.includes("Operations") ?? false;
+  useEffect(() => {
+    let mounted = true;
+    const loadAiAssistConfig = async () => {
+      try {
+        const response = await getAiAssistConfig();
+        if (!mounted) return;
+        setAiAssistEnabled(response.config.enabled);
+      } catch (_error) {
+        if (!mounted) return;
+        setAiAssistEnabled(false);
+      }
+    };
+
+    void loadAiAssistConfig();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setAiNeedsReviewResults({});
+    setAiIncidentSummaries({});
+    setAiHseNarrative("");
+    setAiVerifyingFindingIds({});
+    setAiSummarizingFindingIds({});
+  }, [selectedSourceId, hasSessionResults]);
   const supportedRunCategoryOptions = useMemo(
     () =>
       RUN_CATEGORY_OPTIONS.filter((option) =>
@@ -2125,6 +2166,110 @@ export default function RunAnalysis() {
     }
     handleChange("previewTimestampSeconds", currentVideoTime.toFixed(1));
     void loadPreview(formState.videoPath, currentVideoTime);
+  };
+
+  const handleVerifyNeedsReview = async (finding: AnalysisFinding) => {
+    setAiVerifyingFindingIds((current) => ({ ...current, [finding.id]: true }));
+    try {
+      const response = await verifyNeedsReviewFinding({
+        finding: {
+          id: finding.id,
+          moduleKey: finding.moduleKey,
+          title: finding.title,
+          detail: finding.detail,
+          recommendation: finding.recommendation,
+          metric: finding.metric,
+          snapshotUrl: finding.snapshotUrl,
+          sourceName: selectedSource?.name,
+          sourceLocation: selectedSource?.location,
+        },
+      });
+      setAiNeedsReviewResults((current) => ({
+        ...current,
+        [finding.id]: response.result,
+      }));
+      toast({
+        title: "AI verifier selesai",
+        description: "Verifikasi visual tambahan untuk item needs review sudah dibuat.",
+      });
+    } catch (error) {
+      toast({
+        title: "AI verifier gagal",
+        description: humanizeRequestError(error),
+        variant: "destructive",
+      });
+    } finally {
+      setAiVerifyingFindingIds((current) => ({ ...current, [finding.id]: false }));
+    }
+  };
+
+  const handleGenerateOperatorSummary = async (finding: AnalysisFinding) => {
+    setAiSummarizingFindingIds((current) => ({ ...current, [finding.id]: true }));
+    try {
+      const response = await generateOperatorIncidentSummary({
+        source: {
+          name: selectedSource?.name,
+          location: selectedSource?.location,
+          type: selectedSource?.type,
+        },
+        finding: {
+          id: finding.id,
+          moduleKey: finding.moduleKey,
+          title: finding.title,
+          detail: finding.detail,
+          recommendation: finding.recommendation,
+          metric: finding.metric,
+          severity: finding.severity,
+          snapshotUrl: finding.snapshotUrl,
+        },
+      });
+      setAiIncidentSummaries((current) => ({
+        ...current,
+        [finding.id]: response.result,
+      }));
+      toast({
+        title: "Ringkasan incident siap",
+        description: "AI assist sudah membuat ringkasan dan action list untuk operator.",
+      });
+    } catch (error) {
+      toast({
+        title: "Ringkasan incident gagal",
+        description: humanizeRequestError(error),
+        variant: "destructive",
+      });
+    } finally {
+      setAiSummarizingFindingIds((current) => ({ ...current, [finding.id]: false }));
+    }
+  };
+
+  const handleGenerateHseNarrative = async () => {
+    setIsGeneratingAiHseNarrative(true);
+    try {
+      const response = await generateHseNarrative({
+        source: selectedSource
+          ? {
+              name: selectedSource.name,
+              location: selectedSource.location,
+              analytics: selectedSource.analytics,
+            }
+          : undefined,
+        report: hseReport,
+        findings: unifiedFindings.filter((finding) => finding.category === "HSE" || finding.category === "PPE"),
+      });
+      setAiHseNarrative(response.result.narrative);
+      toast({
+        title: "Narasi HSE siap",
+        description: "AI assist sudah menyusun narasi supervisor untuk sesi aktif.",
+      });
+    } catch (error) {
+      toast({
+        title: "Narasi HSE gagal",
+        description: humanizeRequestError(error),
+        variant: "destructive",
+      });
+    } finally {
+      setIsGeneratingAiHseNarrative(false);
+    }
   };
 
   const runNextQueuedHseModule = () => {
@@ -4429,6 +4574,43 @@ export default function RunAnalysis() {
                   </p>
                 </div>
               ) : null}
+              {(sourceSupportsHse || hseReport) && hasSessionResults ? (
+                <div className="rounded-lg border bg-secondary/20 p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">AI HSE Narrative Assistant</p>
+                      <p className="text-sm text-muted-foreground">
+                        Gunakan Gemma 4 untuk menyusun narasi supervisor dari evidence PPE/HSE pada sesi aktif.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      disabled={!aiAssistEnabled || isGeneratingAiHseNarrative}
+                      onClick={handleGenerateHseNarrative}
+                    >
+                      {isGeneratingAiHseNarrative ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <ClipboardCheck className="w-4 h-4" />
+                      )}
+                      Buat Narasi AI
+                    </Button>
+                  </div>
+                  {!aiAssistEnabled ? (
+                    <p className="text-xs text-muted-foreground">
+                      AI assist belum aktif. Aktifkan provider Gemma 4 dari halaman <code>Settings</code>.
+                    </p>
+                  ) : null}
+                  {aiHseNarrative ? (
+                    <div className="rounded-lg border border-border bg-background/50 p-4 text-sm leading-7 text-foreground">
+                      {aiHseNarrative}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           )}
         </CardContent>
@@ -4479,6 +4661,42 @@ export default function RunAnalysis() {
                           <div className="text-xs text-muted-foreground">
                             Rekomendasi: <span className="text-foreground">{finding.recommendation}</span>
                           </div>
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="gap-2"
+                              disabled={!aiAssistEnabled || aiSummarizingFindingIds[finding.id]}
+                              onClick={() => void handleGenerateOperatorSummary(finding)}
+                            >
+                              {aiSummarizingFindingIds[finding.id] ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <ClipboardCheck className="w-4 h-4" />
+                              )}
+                              Ringkas Incident
+                            </Button>
+                            {!aiAssistEnabled ? (
+                              <span className="text-xs text-muted-foreground">
+                                Aktifkan AI assist di <code>Settings</code>.
+                              </span>
+                            ) : null}
+                          </div>
+                          {aiIncidentSummaries[finding.id] ? (
+                            <div className="rounded-lg border border-border bg-secondary/20 p-3 space-y-2">
+                              <p className="text-xs uppercase tracking-wide text-muted-foreground">AI Operator Summary</p>
+                              <p className="text-sm text-foreground">{aiIncidentSummaries[finding.id].summary}</p>
+                              {aiIncidentSummaries[finding.id].actions.length > 0 ? (
+                                <div className="text-xs text-muted-foreground">
+                                  Tindak lanjut:{" "}
+                                  <span className="text-foreground">
+                                    {aiIncidentSummaries[finding.id].actions.join(" • ")}
+                                  </span>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -4558,6 +4776,45 @@ export default function RunAnalysis() {
                           <div className="text-xs text-muted-foreground">
                             Rekomendasi: <span className="text-foreground">{finding.recommendation}</span>
                           </div>
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="gap-2"
+                              disabled={!aiAssistEnabled || aiVerifyingFindingIds[finding.id]}
+                              onClick={() => void handleVerifyNeedsReview(finding)}
+                            >
+                              {aiVerifyingFindingIds[finding.id] ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <ClipboardCheck className="w-4 h-4" />
+                              )}
+                              AI Verify
+                            </Button>
+                            {!aiAssistEnabled ? (
+                              <span className="text-xs text-muted-foreground">
+                                Aktifkan AI assist di <code>Settings</code>.
+                              </span>
+                            ) : null}
+                          </div>
+                          {aiNeedsReviewResults[finding.id] ? (
+                            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge variant="outline">AI: {aiNeedsReviewResults[finding.id].verdict}</Badge>
+                                <Badge variant="outline">
+                                  Confidence {aiNeedsReviewResults[finding.id].confidence}
+                                </Badge>
+                              </div>
+                              <p className="text-sm text-foreground">{aiNeedsReviewResults[finding.id].rationale}</p>
+                              <p className="text-xs text-muted-foreground">
+                                Saran AI:{" "}
+                                <span className="text-foreground">
+                                  {aiNeedsReviewResults[finding.id].recommendedAction}
+                                </span>
+                              </p>
+                            </div>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell>

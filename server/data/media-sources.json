@@ -1,5 +1,23 @@
 [
   {
+    "id": "media-e9906633-765f-4605-8685-7f474cd576d7",
+    "name": "CCTV 1  Sampel",
+    "location": "Sampel CCTV",
+    "source": "https://eofficev2.bekasikota.go.id/backupcctv/m3/Depan_FTL_Fitness.m3u8",
+    "type": "camera",
+    "status": "active",
+    "analytics": [
+      "PPE"
+    ],
+    "executionMode": "continuous",
+    "monitoringStatus": "running",
+    "monitoringIntervalSeconds": null,
+    "note": "",
+    "lastSeen": "Monitoring aktif",
+    "createdAt": "2026-04-10T01:55:27.771Z",
+    "updatedAt": "2026-04-29T07:55:20.972Z"
+  },
+  {
     "id": "media-136598d5-49e5-4128-ac61-b902035cbb0d",
     "name": "Sampel Video DT Violation",
     "location": "Area DumpTruck",

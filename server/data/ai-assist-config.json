@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "mode": "local",
+  "baseUrl": "http://127.0.0.1:11434/v1",
+  "apiKey": "",
+  "gemmaModel": "gemma-4",
+  "requestTimeoutMs": 30000,
+  "localOllamaBaseUrl": "http://127.0.0.1:11434",
+  "localGemmaModel": "gemma4:e2b"
+}
