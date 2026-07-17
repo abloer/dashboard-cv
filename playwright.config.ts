@@ -24,5 +24,9 @@ export default defineConfig({
     url: "http://127.0.0.1:4173",
     reuseExistingServer: true,
     timeout: 30_000,
+    env: {
+      VITE_SUPABASE_URL: "https://frontend-test.supabase.co",
+      VITE_SUPABASE_PUBLISHABLE_KEY: "frontend-test-publishable-key",
+    },
   },
 });
