@@ -1,4 +1,4 @@
-import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import { analysisServerBaseUrl, apiFetch } from "@/lib/noHelmetAnalysis";
 import type { AnalysisFinding } from "@/lib/analysisFindings";
 import type { MediaExecutionMode, MediaMonitoringStatus, MediaStatus, MediaType } from "@/lib/mediaRegistry";
 import type { SafetyRulesModuleConfig } from "@/lib/safetyRulesConfig";
@@ -96,14 +96,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getHseSafetyRulesDefaults(): Promise<HseDefaultsResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/hse-safety-rules/defaults`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/hse-safety-rules/defaults`);
   return parseResponse<HseDefaultsResponse>(response);
 }
 
 export async function getLatestHseSafetyRulesReport(
   mediaSourceId: string
 ): Promise<HseLatestReportResponse> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${analysisServerBaseUrl}/analysis/hse-safety-rules/source/${encodeURIComponent(mediaSourceId)}/latest`
   );
   return parseResponse<HseLatestReportResponse>(response);
@@ -112,7 +112,7 @@ export async function getLatestHseSafetyRulesReport(
 export async function runHseSafetyRulesAssessment(
   mediaSourceId: string
 ): Promise<HseRunResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/hse-safety-rules`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/hse-safety-rules`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

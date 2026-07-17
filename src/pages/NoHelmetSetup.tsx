@@ -22,6 +22,7 @@ import { getModuleConfigEnvelope, updateModuleConfig, type ModuleConfigActiveMod
 export default function NoHelmetSetup() {
   const { toast } = useToast();
   const [config, setConfig] = useState<NoHelmetModuleConfig>(() => readNoHelmetConfig());
+  const [configVersion, setConfigVersion] = useState(1);
   const [activeModel, setActiveModel] = useState<ModuleConfigActiveModel | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const readiness = useMemo(
@@ -63,6 +64,7 @@ export default function NoHelmetSetup() {
       .then((payload) => {
         if (ignore) return;
         setConfig(payload.config);
+        setConfigVersion(payload.version);
         setActiveModel(payload.activeModel);
         writeNoHelmetConfig(payload.config);
       })
@@ -130,9 +132,10 @@ export default function NoHelmetSetup() {
   const saveConfig = async () => {
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("no-helmet", config);
-      setConfig(saved);
-      writeNoHelmetConfig(saved);
+      const saved = await updateModuleConfig("no-helmet", config, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeNoHelmetConfig(saved.config);
       toast({
         title: "Konfigurasi disimpan",
         description:
@@ -179,9 +182,10 @@ export default function NoHelmetSetup() {
     setConfig(defaults);
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("no-helmet", defaults);
-      setConfig(saved);
-      writeNoHelmetConfig(saved);
+      const saved = await updateModuleConfig("no-helmet", defaults, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeNoHelmetConfig(saved.config);
       toast({
         title: "Konfigurasi direset",
         description: "Preset modul dikembalikan ke default server.",

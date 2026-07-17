@@ -298,7 +298,7 @@ export default function NoHelmetAnalysis() {
     return () => {
       ignore = true;
     };
-  }, [toast]);
+  }, [savedConfig.modelSource, toast]);
 
   useEffect(() => {
     const handlePointerUp = () => setDragPointIndex(null);
@@ -527,8 +527,11 @@ export default function NoHelmetAnalysis() {
     }
   };
 
+  const pollingJobId = analysisJob?.id;
+  const pollingJobStatus = analysisJob?.status;
+
   useEffect(() => {
-    if (!analysisJob || (analysisJob.status !== "queued" && analysisJob.status !== "running")) {
+    if (!pollingJobId || (pollingJobStatus !== "queued" && pollingJobStatus !== "running")) {
       return;
     }
 
@@ -567,7 +570,7 @@ export default function NoHelmetAnalysis() {
 
     const pollJob = async () => {
       try {
-        const response = await getNoHelmetAnalysisJob(analysisJob.id);
+        const response = await getNoHelmetAnalysisJob(pollingJobId);
         if (cancelled) return;
         syncJobState(response.job);
         if (response.job.status === "completed" || response.job.status === "failed") {
@@ -580,8 +583,8 @@ export default function NoHelmetAnalysis() {
         const message = humanizeRequestError(error);
         setIsAnalyzing(false);
         setStderr(message);
-        if (terminalJobToastRef.current !== `poll:${analysisJob.id}`) {
-          terminalJobToastRef.current = `poll:${analysisJob.id}`;
+        if (terminalJobToastRef.current !== `poll:${pollingJobId}`) {
+          terminalJobToastRef.current = `poll:${pollingJobId}`;
           toast({
             title: "Status job gagal diperbarui",
             description: message,
@@ -605,7 +608,7 @@ export default function NoHelmetAnalysis() {
         window.clearInterval(intervalId);
       }
     };
-  }, [analysisJob?.id, toast]);
+  }, [pollingJobId, pollingJobStatus, toast]);
 
   const handleRunAnalysis = async () => {
     if (!selectedSource) {
@@ -635,10 +638,7 @@ export default function NoHelmetAnalysis() {
       setStderr("");
 
       const response = await startNoHelmetAnalysis({
-        mediaSourceId: selectedSource?.id,
-        videoPath: formState.videoPath.trim(),
-        modelPath: formState.modelPath.trim(),
-        roiConfigPath: formState.roiConfigPath.trim() || undefined,
+        mediaSourceId: selectedSource.id,
         roiId: formState.roiId.trim() || "roi-dashboard",
         roiNormalized: true,
         roiPolygon: hasValidRoi ? roiPoints : undefined,

@@ -809,6 +809,12 @@ export default function RunAnalysis() {
   const pendingOperationsModulesRef = useRef<OperationsModuleKey[]>([]);
   const processedWorkingAtHeightJobRef = useRef<string | null>(null);
   const processedOperationsJobRef = useRef<string | null>(null);
+  const runNextQueuedHseModuleRef = useRef<() => void>(() => undefined);
+  const runNextQueuedOperationsModuleRef = useRef<() => void>(() => undefined);
+  const runHseAssessmentInternalRef = useRef<(showSuccessToast?: boolean, continueQueue?: boolean) => void>(
+    () => undefined
+  );
+  const startPpeModuleRef = useRef<(moduleKey: PpeModuleKey) => Promise<void>>(async () => undefined);
   const savedNoHelmetConfig = readNoHelmetConfig();
   const savedNoSafetyVestConfig = readNoSafetyVestConfig();
   const savedNoLifeVestConfig = readNoLifeVestConfig();
@@ -1562,7 +1568,7 @@ export default function RunAnalysis() {
     return () => {
       ignore = true;
     };
-  }, [toast]);
+  }, [savedNoHelmetConfig.modelSource, toast]);
 
   useEffect(() => {
     let ignore = false;
@@ -2352,6 +2358,10 @@ export default function RunAnalysis() {
     }
   };
 
+  runNextQueuedHseModuleRef.current = runNextQueuedHseModule;
+  runNextQueuedOperationsModuleRef.current = runNextQueuedOperationsModule;
+  runHseAssessmentInternalRef.current = runHseAssessmentInternal;
+
   const startWorkingAtHeightModule = async () => {
     if (!selectedSource) {
       return;
@@ -2365,16 +2375,8 @@ export default function RunAnalysis() {
     setStdout("");
     setStderr("");
 
-    const resolvedModelPath =
-      !workingAtHeightFormState.modelPath.trim() || isLegacyContainerModelPath(workingAtHeightFormState.modelPath)
-        ? workingAtHeightServerDefaults?.defaultModelPath || workingAtHeightFormState.modelPath.trim()
-        : workingAtHeightFormState.modelPath.trim();
-
     const response = await startWorkingAtHeightAnalysis({
       mediaSourceId: selectedSource.id,
-      videoPath: formState.videoPath.trim(),
-      modelPath: resolvedModelPath,
-      zoneConfigPath: workingAtHeightFormState.zoneConfigPath.trim() || undefined,
       zoneId: workingAtHeightFormState.zoneId.trim() || "working-at-height-zone",
       zoneNormalized: true,
       zonePolygon: hasValidWorkingAtHeightArea ? workingAtHeightAreaPoints : undefined,
@@ -2424,25 +2426,11 @@ export default function RunAnalysis() {
     setStdout("");
     setStderr("");
 
-    const resolvedVehicleModelPath =
-      !redLightFormState.vehicleModelPath.trim() || isLegacyContainerModelPath(redLightFormState.vehicleModelPath)
-        ? redLightServerDefaults?.defaultVehicleModelPath || redLightFormState.vehicleModelPath.trim()
-        : redLightFormState.vehicleModelPath.trim();
-    const resolvedTrafficLightModelPath =
-      !redLightFormState.trafficLightModelPath.trim() || isLegacyContainerModelPath(redLightFormState.trafficLightModelPath)
-        ? redLightServerDefaults?.defaultTrafficLightModelPath || redLightFormState.trafficLightModelPath.trim()
-        : redLightFormState.trafficLightModelPath.trim();
-
     const response = await startRedLightViolationAnalysis({
       mediaSourceId: selectedSource.id,
-      videoPath: formState.videoPath.trim(),
-      vehicleModelPath: resolvedVehicleModelPath,
-      trafficLightModelPath: resolvedTrafficLightModelPath,
-      stopLineConfigPath: redLightFormState.stopLineConfigPath.trim() || undefined,
       intersectionId: redLightFormState.intersectionId.trim() || "intersection-dashboard",
       stopLineNormalized: true,
-      stopLinePolygon:
-        hasValidRedLightArea && !redLightFormState.stopLineConfigPath.trim() ? redLightAreaPoints : undefined,
+      stopLinePolygon: hasValidRedLightArea ? redLightAreaPoints : undefined,
       confidenceThreshold: Number(redLightFormState.confidenceThreshold),
       iouThreshold: Number(redLightFormState.iouThreshold),
       frameStep: Number(redLightFormState.frameStep),
@@ -2491,20 +2479,11 @@ export default function RunAnalysis() {
     setStdout("");
     setStderr("");
 
-    const resolvedModelPath =
-      !dumpTruckFormState.modelPath.trim() || isLegacyContainerModelPath(dumpTruckFormState.modelPath)
-        ? dumpTruckServerDefaults?.defaultModelPath || dumpTruckFormState.modelPath.trim()
-        : dumpTruckFormState.modelPath.trim();
-
     const response = await startDumpTruckBedOpenAnalysis({
       mediaSourceId: selectedSource.id,
-      videoPath: formState.videoPath.trim(),
-      modelPath: resolvedModelPath,
-      roiConfigPath: dumpTruckFormState.roiConfigPath.trim() || undefined,
       roiId: dumpTruckFormState.roiId.trim() || "dump-truck-bed-open-zone",
       roiNormalized: true,
-      roiPolygon:
-        hasValidDumpTruckArea && !dumpTruckFormState.roiConfigPath.trim() ? dumpTruckAreaPoints : undefined,
+      roiPolygon: hasValidDumpTruckArea ? dumpTruckAreaPoints : undefined,
       confidenceThreshold: Number(dumpTruckFormState.confidenceThreshold),
       iouThreshold: Number(dumpTruckFormState.iouThreshold),
       frameStep: Number(dumpTruckFormState.frameStep),
@@ -2541,8 +2520,11 @@ export default function RunAnalysis() {
     });
   };
 
+  const pollingPpeJobId = analysisJob?.id;
+  const pollingPpeJobStatus = analysisJob?.status;
+
   useEffect(() => {
-    if (!analysisJob || (analysisJob.status !== "queued" && analysisJob.status !== "running")) {
+    if (!pollingPpeJobId || (pollingPpeJobStatus !== "queued" && pollingPpeJobStatus !== "running")) {
       return;
     }
 
@@ -2596,10 +2578,10 @@ export default function RunAnalysis() {
       try {
         const response =
           activePpeModule === "ppe.no-safety-vest"
-            ? await getNoSafetyVestAnalysisJob(analysisJob.id)
+            ? await getNoSafetyVestAnalysisJob(pollingPpeJobId)
             : activePpeModule === "ppe.no-life-vest"
-              ? await getNoLifeVestAnalysisJob(analysisJob.id)
-            : await getNoHelmetAnalysisJob(analysisJob.id);
+              ? await getNoLifeVestAnalysisJob(pollingPpeJobId)
+            : await getNoHelmetAnalysisJob(pollingPpeJobId);
         if (cancelled) return;
         syncJobState(response.job);
         if (response.job.status === "completed" || response.job.status === "failed") {
@@ -2613,8 +2595,8 @@ export default function RunAnalysis() {
         setIsAnalyzing(false);
         setQueuedHseModules([]);
         setStderr(message);
-        if (terminalJobToastRef.current !== `poll:${analysisJob.id}`) {
-          terminalJobToastRef.current = `poll:${analysisJob.id}`;
+        if (terminalJobToastRef.current !== `poll:${pollingPpeJobId}`) {
+          terminalJobToastRef.current = `poll:${pollingPpeJobId}`;
           toast({
             title: "Status job gagal diperbarui",
             description: message,
@@ -2638,7 +2620,7 @@ export default function RunAnalysis() {
         window.clearInterval(intervalId);
       }
     };
-  }, [activePpeModule, activePpeModuleLabel, analysisJob?.id, toast]);
+  }, [activePpeModule, activePpeModuleLabel, pollingPpeJobId, pollingPpeJobStatus, toast]);
 
   useEffect(() => {
     if (
@@ -2653,23 +2635,29 @@ export default function RunAnalysis() {
       setHasSessionResults(true);
       const [nextModule, ...restModules] = pendingPpeModules;
       setPendingPpeModules(restModules);
-      void startPpeModule(nextModule);
+      void startPpeModuleRef.current(nextModule);
       return;
     }
     setHasSessionResults(true);
     if (pendingHseModulesRef.current.length > 0) {
-      runNextQueuedHseModule();
+      runNextQueuedHseModuleRef.current();
       return;
     }
     if (pendingOperationsModulesRef.current.length > 0) {
-      runNextQueuedOperationsModule();
+      runNextQueuedOperationsModuleRef.current();
       return;
     }
     setIsAnalyzing(false);
   }, [analysisJob, pendingPpeModules]);
 
+  const pollingWorkingAtHeightJobId = workingAtHeightJob?.id;
+  const pollingWorkingAtHeightJobStatus = workingAtHeightJob?.status;
+
   useEffect(() => {
-    if (!workingAtHeightJob || (workingAtHeightJob.status !== "queued" && workingAtHeightJob.status !== "running")) {
+    if (
+      !pollingWorkingAtHeightJobId ||
+      (pollingWorkingAtHeightJobStatus !== "queued" && pollingWorkingAtHeightJobStatus !== "running")
+    ) {
       return;
     }
 
@@ -2708,7 +2696,7 @@ export default function RunAnalysis() {
 
     const pollJob = async () => {
       try {
-        const response = await getWorkingAtHeightAnalysisJob(workingAtHeightJob.id);
+        const response = await getWorkingAtHeightAnalysisJob(pollingWorkingAtHeightJobId);
         if (cancelled) return;
         syncJobState(response.job);
         if (response.job.status === "completed" || response.job.status === "failed") {
@@ -2722,8 +2710,8 @@ export default function RunAnalysis() {
         setQueuedHseModules([]);
         setIsAnalyzing(false);
         setStderr(message);
-        if (terminalJobToastRef.current !== `poll:${workingAtHeightJob.id}`) {
-          terminalJobToastRef.current = `poll:${workingAtHeightJob.id}`;
+        if (terminalJobToastRef.current !== `poll:${pollingWorkingAtHeightJobId}`) {
+          terminalJobToastRef.current = `poll:${pollingWorkingAtHeightJobId}`;
           toast({
             title: "Status Working at Height gagal diperbarui",
             description: message,
@@ -2747,7 +2735,7 @@ export default function RunAnalysis() {
         window.clearInterval(intervalId);
       }
     };
-  }, [toast, workingAtHeightJob?.id]);
+  }, [pollingWorkingAtHeightJobId, pollingWorkingAtHeightJobStatus, toast]);
 
   useEffect(() => {
     if (
@@ -2762,18 +2750,26 @@ export default function RunAnalysis() {
     setHasSessionResults(true);
     setActiveHseModule(null);
     if (pendingHseModulesRef.current.length > 0) {
-      runNextQueuedHseModule();
+      runNextQueuedHseModuleRef.current();
       return;
     }
     if (pendingOperationsModulesRef.current.length > 0) {
-      runNextQueuedOperationsModule();
+      runNextQueuedOperationsModuleRef.current();
       return;
     }
     setIsAnalyzing(false);
   }, [workingAtHeightJob]);
 
+  const pollingOperationsJobId = operationsJob?.id;
+  const pollingOperationsJobStatus = operationsJob?.status;
+  const pollingOperationsJobType = operationsJob?.analysisType;
+
   useEffect(() => {
-    if (!operationsJob || (operationsJob.status !== "queued" && operationsJob.status !== "running")) {
+    if (
+      !pollingOperationsJobId ||
+      !pollingOperationsJobType ||
+      (pollingOperationsJobStatus !== "queued" && pollingOperationsJobStatus !== "running")
+    ) {
       return;
     }
 
@@ -2827,9 +2823,9 @@ export default function RunAnalysis() {
     const pollJob = async () => {
       try {
         const response =
-          operationsJob.analysisType === "dump_truck_bed_open"
-            ? await getDumpTruckBedOpenAnalysisJob(operationsJob.id)
-            : await getRedLightViolationAnalysisJob(operationsJob.id);
+          pollingOperationsJobType === "dump_truck_bed_open"
+            ? await getDumpTruckBedOpenAnalysisJob(pollingOperationsJobId)
+            : await getRedLightViolationAnalysisJob(pollingOperationsJobId);
         if (cancelled) return;
         syncJobState(response.job);
         if (response.job.status === "completed" || response.job.status === "failed") {
@@ -2843,11 +2839,11 @@ export default function RunAnalysis() {
         setQueuedOperationsModules([]);
         setIsAnalyzing(false);
         setStderr(message);
-        if (terminalJobToastRef.current !== `poll:${operationsJob.id}`) {
-          terminalJobToastRef.current = `poll:${operationsJob.id}`;
+        if (terminalJobToastRef.current !== `poll:${pollingOperationsJobId}`) {
+          terminalJobToastRef.current = `poll:${pollingOperationsJobId}`;
           toast({
             title:
-              operationsJob.analysisType === "dump_truck_bed_open"
+              pollingOperationsJobType === "dump_truck_bed_open"
                 ? "Status Dump Truck Bed Open gagal diperbarui"
                 : "Status Red Light Violation gagal diperbarui",
             description: message,
@@ -2871,7 +2867,7 @@ export default function RunAnalysis() {
         window.clearInterval(intervalId);
       }
     };
-  }, [operationsJob?.id, toast]);
+  }, [pollingOperationsJobId, pollingOperationsJobStatus, pollingOperationsJobType, toast]);
 
   useEffect(() => {
     if (
@@ -2886,7 +2882,7 @@ export default function RunAnalysis() {
     setHasSessionResults(true);
     setActiveOperationsModule(null);
     if (pendingOperationsModulesRef.current.length > 0) {
-      runNextQueuedOperationsModule();
+      runNextQueuedOperationsModuleRef.current();
       return;
     }
     setIsAnalyzing(false);
@@ -2911,7 +2907,7 @@ export default function RunAnalysis() {
       return;
     }
     autoRefreshedHseKeyRef.current = refreshKey;
-    void runHseAssessmentInternal(false);
+    void runHseAssessmentInternalRef.current(false);
   }, [hasSessionResults, isAnalyzing, isHseReportStale, isRunningHse, latestPpeEvidenceAt, selectedHseModules, selectedSourceId, sourceSupportsHse]);
 
   const startPpeModule = async (moduleKey: PpeModuleKey) => {
@@ -2929,24 +2925,9 @@ export default function RunAnalysis() {
 
     const isVestModule = moduleKey === "ppe.no-safety-vest";
     const isLifeVestModule = moduleKey === "ppe.no-life-vest";
-    const resolvedNoSafetyVestModelPath =
-      !vestFormState.modelPath.trim() || isLegacyContainerModelPath(vestFormState.modelPath)
-        ? noSafetyVestServerDefaults?.defaultModelPath || vestFormState.modelPath.trim()
-        : vestFormState.modelPath.trim();
-    const resolvedNoLifeVestModelPath =
-      !lifeVestFormState.modelPath.trim() || isLegacyContainerModelPath(lifeVestFormState.modelPath)
-        ? noLifeVestServerDefaults?.defaultModelPath || lifeVestFormState.modelPath.trim()
-        : lifeVestFormState.modelPath.trim();
-    const resolvedNoHelmetModelPath =
-      !formState.modelPath.trim() || isLegacyContainerModelPath(formState.modelPath)
-        ? serverDefaults?.defaultModelPath || formState.modelPath.trim()
-        : formState.modelPath.trim();
     const response = isVestModule
       ? await startNoSafetyVestAnalysis({
           mediaSourceId: selectedSource.id,
-          videoPath: formState.videoPath.trim(),
-          modelPath: resolvedNoSafetyVestModelPath,
-          roiConfigPath: vestFormState.roiConfigPath.trim() || undefined,
           roiId: vestFormState.roiId.trim() || "roi-dashboard",
           roiNormalized: true,
           roiPolygon: hasValidVestArea ? vestAreaPoints : undefined,
@@ -2963,9 +2944,6 @@ export default function RunAnalysis() {
       : isLifeVestModule
         ? await startNoLifeVestAnalysis({
             mediaSourceId: selectedSource.id,
-            videoPath: formState.videoPath.trim(),
-            modelPath: resolvedNoLifeVestModelPath,
-            roiConfigPath: lifeVestFormState.roiConfigPath.trim() || undefined,
             roiId: lifeVestFormState.roiId.trim() || "roi-dashboard",
             roiNormalized: true,
             roiPolygon: hasValidLifeVestArea ? lifeVestAreaPoints : undefined,
@@ -2981,9 +2959,6 @@ export default function RunAnalysis() {
           })
       : await startNoHelmetAnalysis({
           mediaSourceId: selectedSource.id,
-          videoPath: formState.videoPath.trim(),
-          modelPath: resolvedNoHelmetModelPath,
-          roiConfigPath: formState.roiConfigPath.trim() || undefined,
           roiId: formState.roiId.trim() || "roi-dashboard",
           roiNormalized: true,
           roiPolygon: hasValidHelmetArea ? helmetAreaPoints : undefined,
@@ -3024,6 +2999,8 @@ export default function RunAnalysis() {
       description: response.message,
     });
   };
+
+  startPpeModuleRef.current = startPpeModule;
 
   const startPpeAnalysis = async (queuedHseModules: HseModuleKey[]) => {
     if (!selectedSource) {

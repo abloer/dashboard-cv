@@ -24,6 +24,7 @@ import {
 export default function DumpTruckBedOpenSetup() {
   const { toast } = useToast();
   const [config, setConfig] = useState<DumpTruckBedOpenModuleConfig>(() => readDumpTruckBedOpenConfig());
+  const [configVersion, setConfigVersion] = useState(1);
   const [activeModel, setActiveModel] = useState<ModuleConfigActiveModel | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -65,6 +66,7 @@ export default function DumpTruckBedOpenSetup() {
           ...payload.config,
         };
         setConfig(mergedConfig);
+        setConfigVersion(payload.version);
         setActiveModel(payload.activeModel);
         writeDumpTruckBedOpenConfig(mergedConfig);
       })
@@ -110,9 +112,10 @@ export default function DumpTruckBedOpenSetup() {
   const saveConfig = async () => {
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("dump-truck-bed-open", config);
-      setConfig(saved);
-      writeDumpTruckBedOpenConfig(saved);
+      const saved = await updateModuleConfig("dump-truck-bed-open", config, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeDumpTruckBedOpenConfig(saved.config);
       toast({
         title: "Konfigurasi disimpan",
         description: "Preset default Operations • Dump Truck Bed Open tersimpan di server.",
@@ -137,9 +140,10 @@ export default function DumpTruckBedOpenSetup() {
     setConfig(defaults);
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("dump-truck-bed-open", defaults);
-      setConfig(saved);
-      writeDumpTruckBedOpenConfig(saved);
+      const saved = await updateModuleConfig("dump-truck-bed-open", defaults, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeDumpTruckBedOpenConfig(saved.config);
       toast({
         title: "Konfigurasi direset",
         description: "Preset dump truck bed open dikembalikan ke nilai default server.",

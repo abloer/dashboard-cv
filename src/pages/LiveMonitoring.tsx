@@ -265,6 +265,7 @@ export default function LiveMonitoring() {
           source.executionMode === "manual" ? "continuous" : source.executionMode,
         monitoringStatus,
         monitoringIntervalSeconds: source.monitoringIntervalSeconds,
+        expectedVersion: source.version,
       });
       toast({
         title:

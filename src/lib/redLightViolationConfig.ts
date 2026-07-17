@@ -37,7 +37,7 @@ export const DEFAULT_RED_LIGHT_VIOLATION_CONFIG: RedLightViolationModuleConfig =
     "Gunakan modul ini untuk persimpangan hauling road atau area crossing tambang. Source harus memiliki view jelas ke lampu dan stop line agar kendaraan yang melintas saat lampu merah bisa diverifikasi.",
 };
 
-function normalizeSavedRedLightConfig(
+export function normalizeSavedRedLightConfig(
   parsed: Partial<RedLightViolationModuleConfig>
 ): RedLightViolationModuleConfig {
   return {

@@ -23,6 +23,7 @@ import {
 export default function SafetyRulesSetup() {
   const { toast } = useToast();
   const [config, setConfig] = useState<SafetyRulesModuleConfig>(() => readSafetyRulesConfig());
+  const [configVersion, setConfigVersion] = useState(1);
   const [activeModel, setActiveModel] = useState<ModuleConfigActiveModel | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -55,6 +56,7 @@ export default function SafetyRulesSetup() {
       .then((payload) => {
         if (ignore) return;
         setConfig(payload.config);
+        setConfigVersion(payload.version);
         setActiveModel(payload.activeModel);
         writeSafetyRulesConfig(payload.config);
       })
@@ -79,9 +81,10 @@ export default function SafetyRulesSetup() {
   const saveConfig = async () => {
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("safety-rules", config);
-      setConfig(saved);
-      writeSafetyRulesConfig(saved);
+      const saved = await updateModuleConfig("safety-rules", config, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeSafetyRulesConfig(saved.config);
       toast({
         title: "Konfigurasi disimpan",
         description: "Preset HSE • Safety Rules tersimpan di server dan aktif sebagai baseline operasional.",
@@ -106,9 +109,10 @@ export default function SafetyRulesSetup() {
     setConfig(defaults);
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("safety-rules", defaults);
-      setConfig(saved);
-      writeSafetyRulesConfig(saved);
+      const saved = await updateModuleConfig("safety-rules", defaults, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeSafetyRulesConfig(saved.config);
       toast({
         title: "Konfigurasi direset",
         description: "Preset safety rules dikembalikan ke nilai default server.",

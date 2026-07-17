@@ -1,4 +1,4 @@
-import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import { analysisServerBaseUrl, apiFetch } from "@/lib/noHelmetAnalysis";
 
 async function parseResponse<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => null);
@@ -42,14 +42,14 @@ export interface AiAssistLocalStatus {
 }
 
 export async function getAiAssistConfig(): Promise<{ ok: true; config: AiAssistConfig }> {
-  const response = await fetch(`${analysisServerBaseUrl}/ai-assist/config`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/ai-assist/config`);
   return parseResponse<{ ok: true; config: AiAssistConfig }>(response);
 }
 
 export async function updateAiAssistConfig(
   payload: Partial<AiAssistConfig>
 ): Promise<{ ok: true; config: AiAssistConfig }> {
-  const response = await fetch(`${analysisServerBaseUrl}/ai-assist/config`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/ai-assist/config`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -60,7 +60,7 @@ export async function updateAiAssistConfig(
 }
 
 export async function getAiAssistLocalStatus(): Promise<{ ok: true; status: AiAssistLocalStatus }> {
-  const response = await fetch(`${analysisServerBaseUrl}/ai-assist/status`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/ai-assist/status`);
   return parseResponse<{ ok: true; status: AiAssistLocalStatus }>(response);
 }
 
@@ -77,7 +77,7 @@ export async function verifyNeedsReviewFinding(payload: {
     sourceLocation?: string;
   };
 }): Promise<{ ok: true; result: NeedsReviewAiVerdict }> {
-  const response = await fetch(`${analysisServerBaseUrl}/ai-assist/needs-review-verdict`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/ai-assist/needs-review-verdict`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -96,7 +96,7 @@ export async function generateHseNarrative(payload: {
   report?: unknown;
   findings?: unknown[];
 }): Promise<{ ok: true; result: { narrative: string } }> {
-  const response = await fetch(`${analysisServerBaseUrl}/ai-assist/hse-narrative`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/ai-assist/hse-narrative`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -123,7 +123,7 @@ export async function generateOperatorIncidentSummary(payload: {
     snapshotUrl?: string | null;
   };
 }): Promise<{ ok: true; result: OperatorIncidentAiSummary }> {
-  const response = await fetch(`${analysisServerBaseUrl}/ai-assist/operator-summary`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/ai-assist/operator-summary`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

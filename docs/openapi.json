@@ -1,0 +1,1281 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Dashboard Computer Vision API",
+    "version": "0.1.0",
+    "description": "Shared API contract for the Dashboard Computer Vision pilot backend. Mutating endpoints require authenticated operator/admin sessions unless noted otherwise. Optimistic concurrency mutations require expectedVersion."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8081",
+      "description": "Local backend"
+    }
+  ],
+  "tags": [
+    { "name": "Auth" },
+    { "name": "Media Sources" },
+    { "name": "Module Configs" },
+    { "name": "Models" },
+    { "name": "Analysis" },
+    { "name": "Artifacts" }
+  ],
+  "security": [
+    { "cookieAuth": [] },
+    { "bearerAuth": [] }
+  ],
+  "paths": {
+    "/auth/session": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Exchange a guarded pilot token for an httpOnly session cookie",
+        "description": "Requires x-session-exchange-key when AUTH_SESSION_EXCHANGE_ENABLED is true. Intended as pilot interim auth, not a public login flow.",
+        "security": [],
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "parameters": [
+          { "$ref": "#/components/parameters/SessionExchangeKey" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AuthSessionRequest" },
+              "examples": {
+                "operator": {
+                  "value": { "token": "pilot-token-issued-out-of-band" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session cookie issued",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthSessionResponse" }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "schema": { "type": "string" },
+                "description": "httpOnly signed session cookie"
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/media-sources": {
+      "get": {
+        "tags": ["Media Sources"],
+        "summary": "List media sources",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "responses": {
+          "200": {
+            "description": "Media source list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "items"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/MediaSource" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/AuthError" }
+        }
+      },
+      "post": {
+        "tags": ["Media Sources"],
+        "summary": "Create a media source",
+        "description": "Camera sources are SSRF-validated before persistence. Upload sources must resolve under managed upload roots.",
+        "x-required-roles": ["operator", "admin"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MediaSourceMutation" },
+              "examples": {
+                "camera": {
+                  "value": {
+                    "name": "Pit Camera 01",
+                    "location": "North Pit",
+                    "source": "rtsp://camera.example.local/live",
+                    "type": "camera",
+                    "status": "active",
+                    "analytics": ["ppe.no-helmet"],
+                    "executionMode": "scheduled",
+                    "monitoringStatus": "idle",
+                    "monitoringIntervalSeconds": 300,
+                    "note": "Main haul road"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/MediaSourceItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/media-sources/{id}": {
+      "put": {
+        "tags": ["Media Sources"],
+        "summary": "Replace a media source with optimistic concurrency",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  { "$ref": "#/components/schemas/ExpectedVersion" },
+                  { "$ref": "#/components/schemas/MediaSourceMutation" }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/MediaSourceItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      },
+      "delete": {
+        "tags": ["Media Sources"],
+        "summary": "Delete a media source with optimistic concurrency",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExpectedVersion" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/MediaSourceItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      }
+    },
+    "/media-sources/{id}/status": {
+      "patch": {
+        "tags": ["Media Sources"],
+        "summary": "Update media source status",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MediaSourceStatusMutation" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/MediaSourceItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      }
+    },
+    "/media-sources/{id}/monitoring": {
+      "patch": {
+        "tags": ["Media Sources"],
+        "summary": "Update monitoring state for a media source",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MediaSourceMonitoringMutation" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/MediaSourceItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      }
+    },
+    "/module-configs/{moduleKey}": {
+      "get": {
+        "tags": ["Module Configs"],
+        "summary": "Read module configuration envelope",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/ModuleKey" }],
+        "responses": {
+          "200": {
+            "description": "Module config",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModuleConfigResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "tags": ["Module Configs"],
+        "summary": "Update module configuration with optimistic concurrency",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/ModuleKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ModuleConfigMutation" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed module config",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModuleConfigResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      }
+    },
+    "/models/overview": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "Read model registry overview",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelOverview" },
+          "401": { "$ref": "#/components/responses/AuthError" }
+        }
+      }
+    },
+    "/models/datasets": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "List model datasets",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryList" },
+          "401": { "$ref": "#/components/responses/AuthError" }
+        }
+      },
+      "post": {
+        "tags": ["Models"],
+        "summary": "Create a model dataset",
+        "x-required-roles": ["operator", "admin"],
+        "requestBody": { "$ref": "#/components/requestBodies/ModelDatasetCreate" },
+        "responses": {
+          "201": { "$ref": "#/components/responses/ModelRegistryItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/models/datasets/{id}": {
+      "patch": {
+        "tags": ["Models"],
+        "summary": "Patch a model dataset with optimistic concurrency",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ModelDatasetUpdate" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      }
+    },
+    "/models/training-jobs": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "List training jobs",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryList" },
+          "401": { "$ref": "#/components/responses/AuthError" }
+        }
+      },
+      "post": {
+        "tags": ["Models"],
+        "summary": "Create a training job",
+        "x-required-roles": ["operator", "admin"],
+        "requestBody": { "$ref": "#/components/requestBodies/TrainingJobCreate" },
+        "responses": {
+          "201": { "$ref": "#/components/responses/ModelRegistryItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/models/training-jobs/{id}": {
+      "patch": {
+        "tags": ["Models"],
+        "summary": "Patch a training job with optimistic concurrency",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": { "$ref": "#/components/requestBodies/TrainingJobUpdate" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      }
+    },
+    "/models/versions": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "List model versions",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryList" },
+          "401": { "$ref": "#/components/responses/AuthError" }
+        }
+      }
+    },
+    "/models/versions/{id}": {
+      "patch": {
+        "tags": ["Models"],
+        "summary": "Update model version status with optimistic concurrency",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": { "$ref": "#/components/requestBodies/ModelVersionUpdate" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      }
+    },
+    "/models/evaluations": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "List model evaluations",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryList" },
+          "401": { "$ref": "#/components/responses/AuthError" }
+        }
+      },
+      "post": {
+        "tags": ["Models"],
+        "summary": "Create a model evaluation",
+        "x-required-roles": ["operator", "admin"],
+        "requestBody": { "$ref": "#/components/requestBodies/EvaluationCreate" },
+        "responses": {
+          "201": { "$ref": "#/components/responses/ModelRegistryItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/models/evaluations/{id}": {
+      "patch": {
+        "tags": ["Models"],
+        "summary": "Patch a model evaluation with optimistic concurrency",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": { "$ref": "#/components/requestBodies/EvaluationUpdate" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      }
+    },
+    "/models/benchmarks": {
+      "get": {
+        "tags": ["Models"],
+        "summary": "List model benchmarks",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryList" },
+          "401": { "$ref": "#/components/responses/AuthError" }
+        }
+      },
+      "post": {
+        "tags": ["Models"],
+        "summary": "Create a model benchmark",
+        "x-required-roles": ["operator", "admin"],
+        "requestBody": { "$ref": "#/components/requestBodies/BenchmarkCreate" },
+        "responses": {
+          "201": { "$ref": "#/components/responses/ModelRegistryItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/models/benchmarks/{id}": {
+      "patch": {
+        "tags": ["Models"],
+        "summary": "Patch a model benchmark with optimistic concurrency",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/Id" }],
+        "requestBody": { "$ref": "#/components/requestBodies/BenchmarkUpdate" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/ModelRegistryItem" },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/VersionConflict" }
+        }
+      }
+    },
+    "/analysis/{moduleKey}": {
+      "post": {
+        "tags": ["Analysis"],
+        "summary": "Start an analysis job for a supported module",
+        "description": "Normal contract is ID-based: mediaSourceId plus optional modelVersionId/config semantics. Legacy path fields are deprecated and must remain constrained to managed roots.",
+        "x-required-roles": ["operator", "admin"],
+        "parameters": [{ "$ref": "#/components/parameters/AnalysisModuleKey" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AnalysisRunRequest" },
+              "examples": {
+                "idBasedRun": {
+                  "value": {
+                    "mediaSourceId": "media-123",
+                    "modelVersionId": "model-version-helmet-v3",
+                    "frameStep": 5,
+                    "confidenceThreshold": 0.45
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Analysis job accepted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AnalysisJobAccepted" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/analysis/{moduleKey}/jobs/{id}": {
+      "get": {
+        "tags": ["Analysis"],
+        "summary": "Read analysis job status/output metadata",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "parameters": [
+          { "$ref": "#/components/parameters/AnalysisModuleKey" },
+          { "$ref": "#/components/parameters/Id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Analysis job",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AnalysisJob" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/analysis-output/{artifactPath}": {
+      "get": {
+        "tags": ["Artifacts"],
+        "summary": "Download a signed analysis artifact",
+        "description": "Requires signed URL query parameters generated by the backend. Artifact paths must resolve under analysisOutputRoot.",
+        "security": [],
+        "x-required-roles": ["signed-url"],
+        "parameters": [
+          {
+            "name": "artifactPath",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          { "$ref": "#/components/parameters/ArtifactExpires" },
+          { "$ref": "#/components/parameters/ArtifactSignature" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Artifact file",
+            "content": {
+              "image/*": { "schema": { "type": "string", "format": "binary" } },
+              "application/json": { "schema": { "type": "object" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/analysis-output/cleanup": {
+      "post": {
+        "tags": ["Artifacts"],
+        "summary": "Run analysis artifact retention cleanup",
+        "description": "Admin-only cleanup for expired or over-quota artifacts under analysisOutputRoot. Queued/running job output directories and paths outside the artifact root are skipped.",
+        "x-required-roles": ["admin"],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "maxAgeDays": { "type": "number", "minimum": 0, "exclusiveMinimum": true },
+                  "maxBytes": { "type": "integer", "minimum": 0 },
+                  "dryRun": { "type": "boolean", "default": false }
+                }
+              },
+              "examples": {
+                "dryRun": {
+                  "value": { "dryRun": true, "maxAgeDays": 7 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cleanup result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "deletedCount", "skippedCount", "bytesReclaimed", "durationMs"],
+                  "properties": {
+                    "ok": { "type": "boolean", "const": true },
+                    "dryRun": { "type": "boolean" },
+                    "deletedCount": { "type": "integer", "minimum": 0 },
+                    "skippedCount": { "type": "integer", "minimum": 0 },
+                    "bytesReclaimed": { "type": "integer", "minimum": 0 },
+                    "retainedBytes": { "type": "integer", "minimum": 0 },
+                    "durationMs": { "type": "number", "minimum": 0 },
+                    "errorCode": { "type": ["string", "null"] }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/AuthError" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "500": {
+            "description": "Cleanup failed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "analysis_session"
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque pilot token"
+      }
+    },
+    "parameters": {
+      "Id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "minLength": 1 }
+      },
+      "ModuleKey": {
+        "name": "moduleKey",
+        "in": "path",
+        "required": true,
+        "schema": { "$ref": "#/components/schemas/ModuleKey" }
+      },
+      "AnalysisModuleKey": {
+        "name": "moduleKey",
+        "in": "path",
+        "required": true,
+        "schema": { "$ref": "#/components/schemas/AnalysisModuleKey" }
+      },
+      "SessionExchangeKey": {
+        "name": "x-session-exchange-key",
+        "in": "header",
+        "required": false,
+        "schema": { "type": "string" }
+      },
+      "ArtifactExpires": {
+        "name": "expires",
+        "in": "query",
+        "required": true,
+        "schema": { "type": "integer", "minimum": 1 }
+      },
+      "ArtifactSignature": {
+        "name": "signature",
+        "in": "query",
+        "required": true,
+        "schema": { "type": "string", "minLength": 16 }
+      }
+    },
+    "requestBodies": {
+      "ModelDatasetCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ModelDatasetCreate" }
+          }
+        }
+      },
+      "ModelDatasetUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ModelDatasetUpdate" }
+          }
+        }
+      },
+      "TrainingJobCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/TrainingJobCreate" }
+          }
+        }
+      },
+      "TrainingJobUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/TrainingJobUpdate" }
+          }
+        }
+      },
+      "EvaluationCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/EvaluationCreate" }
+          }
+        }
+      },
+      "EvaluationUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/EvaluationUpdate" }
+          }
+        }
+      },
+      "BenchmarkCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/BenchmarkCreate" }
+          }
+        }
+      },
+      "BenchmarkUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/BenchmarkUpdate" }
+          }
+        }
+      },
+      "ModelVersionUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ModelVersionUpdate" }
+          }
+        }
+      }
+    },
+    "responses": {
+      "AuthError": {
+        "description": "Authentication failed or signed URL invalid",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "examples": { "auth": { "value": { "ok": false, "message": "Authentication required." } } }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Authenticated role is not allowed",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "examples": { "forbidden": { "value": { "ok": false, "message": "Forbidden." } } }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Rate limit exceeded",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "Request validation failed",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "VersionConflict": {
+        "description": "Optimistic concurrency conflict",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+            "examples": {
+              "conflict": {
+                "value": {
+                  "ok": false,
+                  "code": "MODEL_REGISTRY_CONFLICT",
+                  "message": "Item was modified by another request. Refresh and retry."
+                }
+              }
+            }
+          }
+        }
+      },
+      "MediaSourceItem": {
+        "description": "Committed media source",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["ok", "item"],
+              "properties": {
+                "ok": { "const": true },
+                "item": { "$ref": "#/components/schemas/MediaSource" }
+              }
+            }
+          }
+        }
+      },
+      "ModelOverview": {
+        "description": "Model registry overview",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["ok", "overview"],
+              "properties": {
+                "ok": { "const": true },
+                "overview": { "type": "object", "additionalProperties": true }
+              }
+            }
+          }
+        }
+      },
+      "ModelRegistryList": {
+        "description": "Model registry collection",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["ok", "items"],
+              "properties": {
+                "ok": { "const": true },
+                "items": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/ModelRegistryItem" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ModelRegistryItem": {
+        "description": "Committed model registry item",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["ok", "item"],
+              "properties": {
+                "ok": { "const": true },
+                "item": { "$ref": "#/components/schemas/ModelRegistryItem" },
+                "overview": { "type": "object", "additionalProperties": true }
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "AuthSessionRequest": {
+        "type": "object",
+        "required": ["token"],
+        "properties": {
+          "token": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
+      "AuthSessionResponse": {
+        "type": "object",
+        "required": ["ok", "role", "expiresInSeconds"],
+        "properties": {
+          "ok": { "const": true },
+          "role": { "$ref": "#/components/schemas/AuthRole" },
+          "expiresInSeconds": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "AuthRole": {
+        "type": "string",
+        "enum": ["viewer", "operator", "admin"]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["ok", "message"],
+        "properties": {
+          "ok": { "const": false },
+          "code": { "type": "string" },
+          "message": { "type": "string" },
+          "errors": { "type": "object", "additionalProperties": true },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "ExpectedVersion": {
+        "type": "object",
+        "required": ["expectedVersion"],
+        "properties": {
+          "expectedVersion": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "MediaSource": {
+        "allOf": [
+          { "$ref": "#/components/schemas/MediaSourceMutation" },
+          {
+            "type": "object",
+            "required": ["id", "version", "createdAt", "updatedAt"],
+            "properties": {
+              "id": { "type": "string" },
+              "version": { "type": "integer", "minimum": 1 },
+              "createdAt": { "type": "string" },
+              "updatedAt": { "type": "string" }
+            }
+          }
+        ]
+      },
+      "MediaSourceMutation": {
+        "type": "object",
+        "required": ["name", "location", "source", "type", "status"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "location": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1 },
+          "type": { "type": "string", "enum": ["upload", "camera"] },
+          "status": { "$ref": "#/components/schemas/MediaStatus" },
+          "analytics": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "executionMode": { "$ref": "#/components/schemas/ExecutionMode" },
+          "monitoringStatus": { "$ref": "#/components/schemas/MonitoringStatus" },
+          "monitoringIntervalSeconds": { "type": ["integer", "null"], "minimum": 1 },
+          "note": { "type": "string", "default": "" },
+          "lastSeen": { "type": "string" }
+        }
+      },
+      "MediaSourceStatusMutation": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ExpectedVersion" },
+          {
+            "type": "object",
+            "required": ["status"],
+            "properties": {
+              "status": { "$ref": "#/components/schemas/MediaStatus" }
+            }
+          }
+        ]
+      },
+      "MediaSourceMonitoringMutation": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ExpectedVersion" },
+          {
+            "type": "object",
+            "required": ["monitoringStatus"],
+            "properties": {
+              "monitoringStatus": { "$ref": "#/components/schemas/MonitoringStatus" },
+              "executionMode": { "$ref": "#/components/schemas/ExecutionMode" },
+              "monitoringIntervalSeconds": { "type": ["integer", "null"], "minimum": 1 }
+            }
+          }
+        ]
+      },
+      "MediaStatus": {
+        "type": "string",
+        "enum": ["active", "inactive", "maintenance"]
+      },
+      "ExecutionMode": {
+        "type": "string",
+        "enum": ["manual", "scheduled", "continuous"]
+      },
+      "MonitoringStatus": {
+        "type": "string",
+        "enum": ["idle", "running", "paused"]
+      },
+      "ModuleKey": {
+        "type": "string",
+        "enum": [
+          "ppe.no-helmet",
+          "ppe.no-safety-vest",
+          "ppe.no-life-vest",
+          "hse.safety-rules",
+          "hse.working-at-height",
+          "operations.red-light-violation",
+          "operations.dump-truck-bed-open"
+        ]
+      },
+      "AnalysisModuleKey": {
+        "type": "string",
+        "enum": [
+          "no-helmet",
+          "no-safety-vest",
+          "no-life-vest",
+          "working-at-height",
+          "red-light-violation",
+          "dump-truck-bed-open"
+        ]
+      },
+      "ModuleConfigResponse": {
+        "type": "object",
+        "required": ["ok", "moduleKey", "version", "config"],
+        "properties": {
+          "ok": { "const": true },
+          "moduleKey": { "$ref": "#/components/schemas/ModuleKey" },
+          "version": { "type": "integer", "minimum": 1 },
+          "config": { "type": "object", "additionalProperties": true },
+          "resolvedModelPath": { "type": "string" },
+          "activeModel": { "type": ["object", "null"], "additionalProperties": true },
+          "modelSource": { "type": "string", "enum": ["deployment-gate", "manual"] }
+        }
+      },
+      "ModuleConfigMutation": {
+        "type": "object",
+        "required": ["expectedVersion", "config"],
+        "properties": {
+          "expectedVersion": { "type": "integer", "minimum": 1 },
+          "config": { "type": "object", "additionalProperties": true }
+        }
+      },
+      "ModelRegistryItem": {
+        "type": "object",
+        "required": ["id", "version", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "version": { "type": "integer", "minimum": 1 },
+          "createdAt": { "type": "string" },
+          "updatedAt": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "ModelDatasetCreate": {
+        "type": "object",
+        "required": ["name", "domain", "labels", "sourceType", "storagePath"],
+        "properties": {
+          "name": { "type": "string" },
+          "domain": { "$ref": "#/components/schemas/ModelDomain" },
+          "labels": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "sourceType": { "type": "string", "enum": ["upload", "camera", "mixed"] },
+          "imageCount": { "type": "integer", "minimum": 0, "default": 0 },
+          "annotationCount": { "type": "integer", "minimum": 0, "default": 0 },
+          "status": { "type": "string", "enum": ["draft", "ready", "archived"], "default": "draft" },
+          "description": { "type": "string", "default": "" },
+          "storagePath": { "type": "string" }
+        }
+      },
+      "ModelDatasetUpdate": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ExpectedVersion" },
+          {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "domain": { "$ref": "#/components/schemas/ModelDomain" },
+              "labels": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+              "sourceType": { "type": "string", "enum": ["upload", "camera", "mixed"] },
+              "imageCount": { "type": "integer", "minimum": 0 },
+              "annotationCount": { "type": "integer", "minimum": 0 },
+              "status": { "type": "string", "enum": ["draft", "ready", "archived"] },
+              "description": { "type": "string" },
+              "storagePath": { "type": "string" }
+            }
+          }
+        ]
+      },
+      "TrainingJobCreate": {
+        "type": "object",
+        "required": ["datasetId", "targetModule", "baseModelPath"],
+        "properties": {
+          "datasetId": { "type": "string" },
+          "targetModule": { "$ref": "#/components/schemas/ModuleKey" },
+          "baseModelPath": { "type": "string" },
+          "epochs": { "type": "integer", "minimum": 1, "default": 50 },
+          "imageSize": { "type": "integer", "minimum": 1, "default": 1280 },
+          "notes": { "type": "string", "default": "" }
+        }
+      },
+      "TrainingJobUpdate": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ExpectedVersion" },
+          {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string", "enum": ["queued", "running", "completed", "failed"] },
+              "outputModelPath": { "type": ["string", "null"] },
+              "notes": { "type": "string" },
+              "metrics": { "type": "object", "additionalProperties": { "type": "number" } }
+            }
+          }
+        ]
+      },
+      "ModelVersionUpdate": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ExpectedVersion" },
+          {
+            "type": "object",
+            "required": ["status"],
+            "properties": {
+              "status": { "type": "string", "enum": ["candidate", "approved", "active", "rejected"] }
+            }
+          }
+        ]
+      },
+      "EvaluationCreate": {
+        "type": "object",
+        "required": ["modelVersionId"],
+        "properties": {
+          "modelVersionId": { "type": "string" },
+          "status": { "type": "string", "enum": ["draft", "reviewed", "approved", "rejected"], "default": "draft" },
+          "precision": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+          "recall": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+          "map50": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+          "falsePositiveNotes": { "type": "string", "default": "" },
+          "falseNegativeNotes": { "type": "string", "default": "" },
+          "benchmarkNotes": { "type": "string", "default": "" }
+        }
+      },
+      "EvaluationUpdate": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ExpectedVersion" },
+          {
+            "type": "object",
+            "properties": {
+              "status": { "type": "string", "enum": ["draft", "reviewed", "approved", "rejected"] },
+              "precision": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+              "recall": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+              "map50": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+              "falsePositiveNotes": { "type": "string" },
+              "falseNegativeNotes": { "type": "string" },
+              "benchmarkNotes": { "type": "string" }
+            }
+          }
+        ]
+      },
+      "BenchmarkCreate": {
+        "type": "object",
+        "required": ["datasetId", "modelVersionId", "baselineModelPath"],
+        "properties": {
+          "datasetId": { "type": "string" },
+          "modelVersionId": { "type": "string" },
+          "baselineModelPath": { "type": "string" },
+          "recommendation": { "type": "string", "enum": ["keep-current", "replace-model", "fine-tune"], "default": "keep-current" },
+          "status": { "type": "string", "enum": ["draft", "reviewed", "approved"], "default": "draft" },
+          "precisionDelta": { "type": ["number", "null"] },
+          "recallDelta": { "type": ["number", "null"] },
+          "falsePositiveDelta": { "type": ["number", "null"] },
+          "falseNegativeDelta": { "type": ["number", "null"] },
+          "benchmarkNotes": { "type": "string", "default": "" }
+        }
+      },
+      "BenchmarkUpdate": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ExpectedVersion" },
+          {
+            "type": "object",
+            "properties": {
+              "baselineModelPath": { "type": "string" },
+              "recommendation": { "type": "string", "enum": ["keep-current", "replace-model", "fine-tune"] },
+              "status": { "type": "string", "enum": ["draft", "reviewed", "approved"] },
+              "precisionDelta": { "type": ["number", "null"] },
+              "recallDelta": { "type": ["number", "null"] },
+              "falsePositiveDelta": { "type": ["number", "null"] },
+              "falseNegativeDelta": { "type": ["number", "null"] },
+              "benchmarkNotes": { "type": "string" }
+            }
+          }
+        ]
+      },
+      "ModelDomain": {
+        "type": "string",
+        "enum": ["PPE", "HSE", "Operations"]
+      },
+      "AnalysisRunRequest": {
+        "type": "object",
+        "required": ["mediaSourceId"],
+        "properties": {
+          "mediaSourceId": { "type": "string" },
+          "modelVersionId": { "type": "string" },
+          "roiId": { "type": "string" },
+          "zoneId": { "type": "string" },
+          "intersectionId": { "type": "string" },
+          "confidenceThreshold": { "type": "number", "minimum": 0, "maximum": 1 },
+          "iouThreshold": { "type": "number", "minimum": 0, "maximum": 1 },
+          "frameStep": { "type": "integer", "minimum": 1 },
+          "imageSize": { "type": "integer", "minimum": 1 },
+          "roiPolygon": { "$ref": "#/components/schemas/NormalizedPolygon" },
+          "zonePolygon": { "$ref": "#/components/schemas/Polygon" },
+          "stopLinePolygon": { "$ref": "#/components/schemas/Polygon" }
+        },
+        "additionalProperties": true
+      },
+      "NormalizedPolygon": {
+        "type": "array",
+        "minItems": 3,
+        "items": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "number", "minimum": 0, "maximum": 1 },
+            { "type": "number", "minimum": 0, "maximum": 1 }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "Polygon": {
+        "type": "array",
+        "minItems": 3,
+        "items": {
+          "type": "array",
+          "prefixItems": [
+            { "type": "number" },
+            { "type": "number" }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "AnalysisJobAccepted": {
+        "type": "object",
+        "required": ["ok", "jobId", "status", "runId", "createdAt"],
+        "properties": {
+          "ok": { "const": true },
+          "jobId": { "type": "string" },
+          "status": { "type": "string", "enum": ["queued", "running", "completed", "failed"] },
+          "message": { "type": "string" },
+          "runId": { "type": "string" },
+          "outputDir": { "type": "string" },
+          "createdAt": { "type": "string" }
+        }
+      },
+      "AnalysisJob": {
+        "type": "object",
+        "required": ["ok", "id", "status"],
+        "properties": {
+          "ok": { "const": true },
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["queued", "running", "completed", "failed"] },
+          "message": { "type": "string" },
+          "runId": { "type": "string" },
+          "outputDir": { "type": "string" },
+          "summary": { "type": "object", "additionalProperties": true },
+          "artifacts": {
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": true }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

@@ -1,40 +1,31 @@
-import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import { analysisServerBaseUrl, apiFetch } from "@/lib/noHelmetAnalysis";
+import type { components } from "@/lib/apiContract";
 
-export type MediaType = "upload" | "camera";
-export type MediaStatus = "active" | "inactive" | "maintenance";
-export type MediaExecutionMode = "manual" | "scheduled" | "continuous";
-export type MediaMonitoringStatus = "idle" | "running" | "paused";
+type ApiMediaSource = components["schemas"]["MediaSource"];
+type ApiMediaSourcePayload = components["schemas"]["MediaSourceMutation"];
+type ApiMediaSourceStatusPayload = components["schemas"]["MediaSourceStatusMutation"];
+type ApiMediaSourceMonitoringPayload = components["schemas"]["MediaSourceMonitoringMutation"];
 
-export interface MediaSource {
-  id: string;
-  name: string;
-  location: string;
-  source: string;
-  type: MediaType;
-  status: MediaStatus;
-  analytics: string[];
+export type MediaType = ApiMediaSourcePayload["type"];
+export type MediaStatus = components["schemas"]["MediaStatus"];
+export type MediaExecutionMode = components["schemas"]["ExecutionMode"];
+export type MediaMonitoringStatus = components["schemas"]["MonitoringStatus"];
+
+export interface MediaSource extends ApiMediaSource {
   executionMode: MediaExecutionMode;
   monitoringStatus: MediaMonitoringStatus;
   monitoringIntervalSeconds: number | null;
   lastSeen: string;
-  note: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
-export interface MediaSourcePayload {
-  name: string;
-  location: string;
-  source: string;
-  type: MediaType;
-  status: MediaStatus;
+export interface MediaSourcePayload extends ApiMediaSourcePayload {
   analytics: string[];
   executionMode: MediaExecutionMode;
-  monitoringStatus?: MediaMonitoringStatus;
-  monitoringIntervalSeconds?: number | null;
   note: string;
-  lastSeen?: string;
 }
+
+type MediaSourceStatusPayload = ApiMediaSourceStatusPayload;
+type MediaSourceMonitoringPayload = ApiMediaSourceMonitoringPayload;
 
 interface MediaSourcesResponse {
   ok: boolean;
@@ -60,13 +51,13 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getMediaSources(): Promise<MediaSource[]> {
-  const response = await fetch(`${analysisServerBaseUrl}/media-sources`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/media-sources`);
   const payload = await parseResponse<MediaSourcesResponse>(response);
   return payload.items;
 }
 
 export async function createMediaSource(payload: MediaSourcePayload): Promise<MediaSource> {
-  const response = await fetch(`${analysisServerBaseUrl}/media-sources`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/media-sources`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -77,13 +68,17 @@ export async function createMediaSource(payload: MediaSourcePayload): Promise<Me
   return parsed.item;
 }
 
-export async function updateMediaSource(id: string, payload: MediaSourcePayload): Promise<MediaSource> {
-  const response = await fetch(`${analysisServerBaseUrl}/media-sources/${encodeURIComponent(id)}`, {
+export async function updateMediaSource(
+  id: string,
+  expectedVersion: number,
+  payload: MediaSourcePayload
+): Promise<MediaSource> {
+  const response = await apiFetch(`${analysisServerBaseUrl}/media-sources/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, expectedVersion }),
   });
   const parsed = await parseResponse<MediaSourceResponse>(response);
   return parsed.item;
@@ -91,25 +86,30 @@ export async function updateMediaSource(id: string, payload: MediaSourcePayload)
 
 export async function updateMediaSourceStatus(
   id: string,
-  status: MediaStatus
+  status: MediaStatus,
+  expectedVersion: number
 ): Promise<MediaSource> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${analysisServerBaseUrl}/media-sources/${encodeURIComponent(id)}/status`,
     {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, expectedVersion } satisfies MediaSourceStatusPayload),
     }
   );
   const parsed = await parseResponse<MediaSourceResponse>(response);
   return parsed.item;
 }
 
-export async function deleteMediaSource(id: string): Promise<MediaSource> {
-  const response = await fetch(`${analysisServerBaseUrl}/media-sources/${encodeURIComponent(id)}`, {
+export async function deleteMediaSource(id: string, expectedVersion: number): Promise<MediaSource> {
+  const response = await apiFetch(`${analysisServerBaseUrl}/media-sources/${encodeURIComponent(id)}`, {
     method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ expectedVersion }),
   });
   const parsed = await parseResponse<MediaSourceResponse>(response);
   return parsed.item;
@@ -117,13 +117,9 @@ export async function deleteMediaSource(id: string): Promise<MediaSource> {
 
 export async function updateMediaSourceMonitoring(
   id: string,
-  payload: {
-    monitoringStatus: MediaMonitoringStatus;
-    executionMode?: MediaExecutionMode;
-    monitoringIntervalSeconds?: number | null;
-  }
+  payload: MediaSourceMonitoringPayload
 ): Promise<MediaSource> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${analysisServerBaseUrl}/media-sources/${encodeURIComponent(id)}/monitoring`,
     {
       method: "PATCH",

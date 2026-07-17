@@ -1,5 +1,10 @@
 import type { AnalysisFinding } from "@/lib/analysisFindings";
-import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import type { components } from "@/lib/apiContract";
+import { analysisServerBaseUrl, apiFetch } from "@/lib/noHelmetAnalysis";
+
+type ApiAnalysisRunRequest = components["schemas"]["AnalysisRunRequest"];
+type ApiAnalysisJobAccepted = components["schemas"]["AnalysisJobAccepted"];
+type ApiAnalysisJob = components["schemas"]["AnalysisJob"];
 
 export interface DumpTruckBedOpenAnalysisEvent {
   event_id: string;
@@ -43,10 +48,10 @@ export interface DumpTruckBedOpenAnalysisSummary {
   createdAt?: string;
 }
 
-export interface RunDumpTruckBedOpenAnalysisPayload {
-  mediaSourceId?: string;
-  videoPath: string;
-  modelPath: string;
+export interface RunDumpTruckBedOpenAnalysisPayload extends ApiAnalysisRunRequest {
+  modelVersionId?: string;
+  videoPath?: string;
+  modelPath?: string;
   roiConfigPath?: string;
   roiId?: string;
   roiNormalized?: boolean;
@@ -62,7 +67,7 @@ export interface RunDumpTruckBedOpenAnalysisPayload {
   minimumMovingSeconds?: number;
 }
 
-export type DumpTruckBedOpenAnalysisJobStatus = "queued" | "running" | "completed" | "failed";
+export type DumpTruckBedOpenAnalysisJobStatus = ApiAnalysisJob["status"];
 
 export interface DumpTruckBedOpenAnalysisJob {
   id: string;
@@ -82,14 +87,9 @@ export interface DumpTruckBedOpenAnalysisJob {
   queuePosition: number;
 }
 
-export interface StartDumpTruckBedOpenAnalysisResponse {
-  ok: boolean;
-  jobId: string;
-  status: DumpTruckBedOpenAnalysisJobStatus;
+export interface StartDumpTruckBedOpenAnalysisResponse extends ApiAnalysisJobAccepted {
   message: string;
-  runId: string;
   outputDir: string;
-  createdAt: string;
 }
 
 export interface DumpTruckBedOpenAnalysisJobResponse {
@@ -125,14 +125,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getDumpTruckBedOpenDefaults(): Promise<DumpTruckBedOpenDefaultsResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/dump-truck-bed-open/defaults`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/dump-truck-bed-open/defaults`);
   return parseResponse<DumpTruckBedOpenDefaultsResponse>(response);
 }
 
 export async function startDumpTruckBedOpenAnalysis(
   payload: RunDumpTruckBedOpenAnalysisPayload
 ): Promise<StartDumpTruckBedOpenAnalysisResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/dump-truck-bed-open`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/dump-truck-bed-open`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -145,6 +145,6 @@ export async function startDumpTruckBedOpenAnalysis(
 export async function getDumpTruckBedOpenAnalysisJob(
   jobId: string
 ): Promise<DumpTruckBedOpenAnalysisJobResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/dump-truck-bed-open/jobs/${jobId}`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/dump-truck-bed-open/jobs/${jobId}`);
   return parseResponse<DumpTruckBedOpenAnalysisJobResponse>(response);
 }

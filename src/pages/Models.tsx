@@ -822,7 +822,11 @@ export default function Models() {
 
   const handleUpdateDatasetStatus = async (datasetId: string, status: ModelDatasetStatus) => {
     try {
-      const response = await updateModelDataset(datasetId, { status });
+      const dataset = datasets.find((item) => item.id === datasetId);
+      if (!dataset) {
+        throw new Error("Dataset tidak ditemukan. Refresh halaman dan coba lagi.");
+      }
+      const response = await updateModelDataset(datasetId, { status, expectedVersion: dataset.version });
       setDatasets((current) =>
         current.map((item) => (item.id === datasetId ? response.item : item))
       );
@@ -907,7 +911,12 @@ export default function Models() {
     }
 
     try {
+      const job = trainingJobs.find((item) => item.id === jobId);
+      if (!job) {
+        throw new Error("Training job tidak ditemukan. Refresh halaman dan coba lagi.");
+      }
       const response = await updateModelTrainingJob(jobId, {
+        expectedVersion: job.version,
         status: draft.status,
         outputModelPath: draft.outputModelPath.trim() ? draft.outputModelPath.trim() : null,
         notes: draft.notes,
@@ -1007,7 +1016,12 @@ export default function Models() {
     }
 
     try {
+      const evaluation = evaluations.find((item) => item.id === evaluationId);
+      if (!evaluation) {
+        throw new Error("Evaluation tidak ditemukan. Refresh halaman dan coba lagi.");
+      }
       const response = await updateModelEvaluation(evaluationId, {
+        expectedVersion: evaluation.version,
         status: draft.status,
         benchmarkNotes: draft.benchmarkNotes,
       });
@@ -1112,7 +1126,12 @@ export default function Models() {
     }
 
     try {
+      const benchmark = benchmarks.find((item) => item.id === benchmarkId);
+      if (!benchmark) {
+        throw new Error("Benchmark tidak ditemukan. Refresh halaman dan coba lagi.");
+      }
       const response = await updateModelBenchmark(benchmarkId, {
+        expectedVersion: benchmark.version,
         status: draft.status,
         recommendation: draft.recommendation,
         benchmarkNotes: draft.benchmarkNotes,
@@ -1153,12 +1172,15 @@ export default function Models() {
   };
 
   const handleModelVersionStatus = async (
-    modelVersionId: string,
+    modelVersion: ModelVersion,
     status: "approved" | "rejected" | "active"
   ) => {
-    setIsDeploymentSubmittingId(modelVersionId);
+    setIsDeploymentSubmittingId(modelVersion.id);
     try {
-      const response = await updateModelVersion(modelVersionId, { status });
+      const response = await updateModelVersion(modelVersion.id, {
+        status,
+        expectedVersion: modelVersion.version,
+      });
       setOverview(response.overview);
       await refreshModelVersionsOnly();
       toast({
@@ -2645,7 +2667,7 @@ export default function Models() {
                       variant="outline"
                       size="sm"
                       disabled={isDeploymentSubmittingId === version.id || version.status === "approved"}
-                      onClick={() => void handleModelVersionStatus(version.id, "approved")}
+                      onClick={() => void handleModelVersionStatus(version, "approved")}
                     >
                       Approve
                     </Button>
@@ -2653,14 +2675,14 @@ export default function Models() {
                       variant="outline"
                       size="sm"
                       disabled={isDeploymentSubmittingId === version.id || version.status === "rejected"}
-                      onClick={() => void handleModelVersionStatus(version.id, "rejected")}
+                      onClick={() => void handleModelVersionStatus(version, "rejected")}
                     >
                       Reject
                     </Button>
                     <Button
                       size="sm"
                       disabled={isDeploymentSubmittingId === version.id || version.status === "active"}
-                      onClick={() => void handleModelVersionStatus(version.id, "active")}
+                      onClick={() => void handleModelVersionStatus(version, "active")}
                     >
                       {isDeploymentSubmittingId === version.id ? (
                         <>

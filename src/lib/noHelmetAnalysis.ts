@@ -1,4 +1,5 @@
 import type { AnalysisFinding } from "@/lib/analysisFindings";
+import type { components } from "@/lib/apiContract";
 
 export interface NoHelmetAnalysisEvent {
   event_id: string;
@@ -69,10 +70,14 @@ export interface NoHelmetAnalysisSummary {
   analysisFindings?: AnalysisFinding[];
 }
 
-export interface RunNoHelmetAnalysisPayload {
-  mediaSourceId?: string;
-  videoPath: string;
-  modelPath: string;
+type ApiAnalysisRunRequest = components["schemas"]["AnalysisRunRequest"];
+type ApiAnalysisJobAccepted = components["schemas"]["AnalysisJobAccepted"];
+type ApiAnalysisJob = components["schemas"]["AnalysisJob"];
+
+export interface RunNoHelmetAnalysisPayload extends ApiAnalysisRunRequest {
+  modelVersionId?: string;
+  videoPath?: string;
+  modelPath?: string;
   roiConfigPath?: string;
   roiId?: string;
   roiNormalized?: boolean;
@@ -99,7 +104,7 @@ export interface RunNoHelmetAnalysisResponse {
   stderr: string;
 }
 
-export type NoHelmetAnalysisJobStatus = "queued" | "running" | "completed" | "failed";
+export type NoHelmetAnalysisJobStatus = ApiAnalysisJob["status"];
 
 export interface NoHelmetAnalysisJob {
   id: string;
@@ -119,14 +124,9 @@ export interface NoHelmetAnalysisJob {
   queuePosition: number;
 }
 
-export interface StartNoHelmetAnalysisResponse {
-  ok: boolean;
-  jobId: string;
-  status: NoHelmetAnalysisJobStatus;
+export interface StartNoHelmetAnalysisResponse extends ApiAnalysisJobAccepted {
   message: string;
-  runId: string;
   outputDir: string;
-  createdAt: string;
 }
 
 export interface NoHelmetAnalysisJobResponse {
@@ -182,6 +182,13 @@ export const analysisServerBaseUrl =
   (import.meta.env.VITE_ANALYSIS_SERVER_URL as string | undefined)?.replace(/\/$/, "") ||
   DEFAULT_ANALYSIS_SERVER_URL;
 
+export function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  return fetch(input, {
+    ...init,
+    credentials: init.credentials ?? "include",
+  });
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload?.ok) {
@@ -191,14 +198,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getNoHelmetDefaults(): Promise<NoHelmetDefaultsResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-helmet/defaults`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/no-helmet/defaults`);
   return parseResponse<NoHelmetDefaultsResponse>(response);
 }
 
 export async function startNoHelmetAnalysis(
   payload: RunNoHelmetAnalysisPayload
 ): Promise<StartNoHelmetAnalysisResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-helmet`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/no-helmet`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -211,13 +218,13 @@ export async function startNoHelmetAnalysis(
 export async function getNoHelmetAnalysisJob(
   jobId: string
 ): Promise<NoHelmetAnalysisJobResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-helmet/jobs/${jobId}`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/no-helmet/jobs/${jobId}`);
   return parseResponse<NoHelmetAnalysisJobResponse>(response);
 }
 
 export async function uploadVideoFile(file: File): Promise<UploadVideoResponse> {
   const encodedFileName = encodeURIComponent(file.name);
-  const response = await fetch(
+  const response = await apiFetch(
     `${analysisServerBaseUrl}/analysis/upload-video?filename=${encodedFileName}`,
     {
       method: "POST",
@@ -233,7 +240,7 @@ export async function uploadVideoFile(file: File): Promise<UploadVideoResponse> 
 
 export async function deleteUploadedVideo(videoPath: string): Promise<void> {
   const encodedVideoPath = encodeURIComponent(videoPath);
-  const response = await fetch(
+  const response = await apiFetch(
     `${analysisServerBaseUrl}/analysis/upload-video?videoPath=${encodedVideoPath}`,
     {
       method: "DELETE",
@@ -246,7 +253,7 @@ export async function getVideoPreview(
   videoPath: string,
   timestampSeconds?: number
 ): Promise<VideoPreviewResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/video-preview`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/video-preview`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -260,7 +267,7 @@ export async function getVideoPreview(
 }
 
 export async function getSourcePreview(source: string): Promise<SourcePreviewResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/source-preview`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/source-preview`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

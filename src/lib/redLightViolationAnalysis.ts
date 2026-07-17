@@ -1,5 +1,10 @@
 import type { AnalysisFinding } from "@/lib/analysisFindings";
-import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import type { components } from "@/lib/apiContract";
+import { analysisServerBaseUrl, apiFetch } from "@/lib/noHelmetAnalysis";
+
+type ApiAnalysisRunRequest = components["schemas"]["AnalysisRunRequest"];
+type ApiAnalysisJobAccepted = components["schemas"]["AnalysisJobAccepted"];
+type ApiAnalysisJob = components["schemas"]["AnalysisJob"];
 
 export interface RedLightViolationAnalysisEvent {
   event_id: string;
@@ -43,11 +48,11 @@ export interface RedLightViolationAnalysisSummary {
   createdAt?: string;
 }
 
-export interface RunRedLightViolationAnalysisPayload {
-  mediaSourceId?: string;
-  videoPath: string;
-  vehicleModelPath: string;
-  trafficLightModelPath: string;
+export interface RunRedLightViolationAnalysisPayload extends ApiAnalysisRunRequest {
+  modelVersionId?: string;
+  videoPath?: string;
+  vehicleModelPath?: string;
+  trafficLightModelPath?: string;
   stopLineConfigPath?: string;
   intersectionId?: string;
   stopLineNormalized?: boolean;
@@ -62,7 +67,7 @@ export interface RunRedLightViolationAnalysisPayload {
   crossingWindowSeconds?: number;
 }
 
-export type RedLightViolationAnalysisJobStatus = "queued" | "running" | "completed" | "failed";
+export type RedLightViolationAnalysisJobStatus = ApiAnalysisJob["status"];
 
 export interface RedLightViolationAnalysisJob {
   id: string;
@@ -82,14 +87,9 @@ export interface RedLightViolationAnalysisJob {
   queuePosition: number;
 }
 
-export interface StartRedLightViolationAnalysisResponse {
-  ok: boolean;
-  jobId: string;
-  status: RedLightViolationAnalysisJobStatus;
+export interface StartRedLightViolationAnalysisResponse extends ApiAnalysisJobAccepted {
   message: string;
-  runId: string;
   outputDir: string;
-  createdAt: string;
 }
 
 export interface RedLightViolationAnalysisJobResponse {
@@ -126,14 +126,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getRedLightViolationDefaults(): Promise<RedLightViolationDefaultsResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/red-light-violation/defaults`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/red-light-violation/defaults`);
   return parseResponse<RedLightViolationDefaultsResponse>(response);
 }
 
 export async function startRedLightViolationAnalysis(
   payload: RunRedLightViolationAnalysisPayload
 ): Promise<StartRedLightViolationAnalysisResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/red-light-violation`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/red-light-violation`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -146,6 +146,6 @@ export async function startRedLightViolationAnalysis(
 export async function getRedLightViolationAnalysisJob(
   jobId: string
 ): Promise<RedLightViolationAnalysisJobResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/red-light-violation/jobs/${jobId}`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/red-light-violation/jobs/${jobId}`);
   return parseResponse<RedLightViolationAnalysisJobResponse>(response);
 }

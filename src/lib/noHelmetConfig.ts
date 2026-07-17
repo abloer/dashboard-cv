@@ -74,7 +74,7 @@ export const DEFAULT_NO_HELMET_CONFIG: NoHelmetModuleConfig = {
     "Gunakan modul ini sebagai baseline inspeksi kepatuhan helm pada area produksi, jalur alat berat, dan titik kerja dengan risiko benda jatuh. Preset default dibuat lebih konservatif untuk kamera jarak jauh agar false positive berkurang.",
 };
 
-function normalizeSavedNoHelmetConfig(parsed: Partial<NoHelmetModuleConfig>): NoHelmetModuleConfig {
+export function normalizeSavedNoHelmetConfig(parsed: Partial<NoHelmetModuleConfig>): NoHelmetModuleConfig {
   const normalizedModelPath =
     typeof parsed.modelPath === "string" && parsed.modelPath.startsWith("/Users/")
       ? DEFAULT_NO_HELMET_CONFIG.modelPath

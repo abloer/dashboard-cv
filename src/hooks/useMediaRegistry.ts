@@ -34,8 +34,8 @@ export function useCreateMediaSource() {
 export function useUpdateMediaSource() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: MediaSourcePayload }) =>
-      updateMediaSource(id, payload),
+    mutationFn: ({ id, expectedVersion, payload }: { id: string; expectedVersion: number; payload: MediaSourcePayload }) =>
+      updateMediaSource(id, expectedVersion, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: MEDIA_REGISTRY_QUERY_KEY });
     },
@@ -45,8 +45,8 @@ export function useUpdateMediaSource() {
 export function useUpdateMediaSourceStatus() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, status }: { id: string; status: MediaStatus }) =>
-      updateMediaSourceStatus(id, status),
+    mutationFn: ({ id, status, expectedVersion }: { id: string; status: MediaStatus; expectedVersion: number }) =>
+      updateMediaSourceStatus(id, status, expectedVersion),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: MEDIA_REGISTRY_QUERY_KEY });
     },
@@ -56,7 +56,8 @@ export function useUpdateMediaSourceStatus() {
 export function useDeleteMediaSource() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => deleteMediaSource(id),
+    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: number }) =>
+      deleteMediaSource(id, expectedVersion),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: MEDIA_REGISTRY_QUERY_KEY });
     },
@@ -71,16 +72,19 @@ export function useUpdateMediaSourceMonitoring() {
       monitoringStatus,
       executionMode,
       monitoringIntervalSeconds,
+      expectedVersion,
     }: {
       id: string;
       monitoringStatus: MediaMonitoringStatus;
       executionMode?: MediaExecutionMode;
       monitoringIntervalSeconds?: number | null;
+      expectedVersion: number;
     }) =>
       updateMediaSourceMonitoring(id, {
         monitoringStatus,
         executionMode,
         monitoringIntervalSeconds,
+        expectedVersion,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: MEDIA_REGISTRY_QUERY_KEY });

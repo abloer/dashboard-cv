@@ -24,6 +24,7 @@ import {
 export default function RedLightViolationSetup() {
   const { toast } = useToast();
   const [config, setConfig] = useState<RedLightViolationModuleConfig>(() => readRedLightViolationConfig());
+  const [configVersion, setConfigVersion] = useState(1);
   const [activeModel, setActiveModel] = useState<ModuleConfigActiveModel | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -68,6 +69,7 @@ export default function RedLightViolationSetup() {
           ...payload.config,
         };
         setConfig(mergedConfig);
+        setConfigVersion(payload.version);
         setActiveModel(payload.activeModel);
         writeRedLightViolationConfig(mergedConfig);
       })
@@ -114,9 +116,10 @@ export default function RedLightViolationSetup() {
   const saveConfig = async () => {
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("red-light-violation", config);
-      setConfig(saved);
-      writeRedLightViolationConfig(saved);
+      const saved = await updateModuleConfig("red-light-violation", config, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeRedLightViolationConfig(saved.config);
       toast({
         title: "Konfigurasi disimpan",
         description: "Preset default Operations • Red Light Violation tersimpan di server.",
@@ -141,9 +144,10 @@ export default function RedLightViolationSetup() {
     setConfig(defaults);
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("red-light-violation", defaults);
-      setConfig(saved);
-      writeRedLightViolationConfig(saved);
+      const saved = await updateModuleConfig("red-light-violation", defaults, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeRedLightViolationConfig(saved.config);
       toast({
         title: "Konfigurasi direset",
         description: "Preset red light violation dikembalikan ke nilai default server.",

@@ -1,5 +1,10 @@
 import type { AnalysisFinding } from "@/lib/analysisFindings";
-import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import type { components } from "@/lib/apiContract";
+import { analysisServerBaseUrl, apiFetch } from "@/lib/noHelmetAnalysis";
+
+type ApiAnalysisRunRequest = components["schemas"]["AnalysisRunRequest"];
+type ApiAnalysisJobAccepted = components["schemas"]["AnalysisJobAccepted"];
+type ApiAnalysisJob = components["schemas"]["AnalysisJob"];
 
 export interface NoSafetyVestAnalysisEvent {
   event_id: string;
@@ -70,10 +75,10 @@ export interface NoSafetyVestAnalysisSummary {
   analysisFindings?: AnalysisFinding[];
 }
 
-export interface RunNoSafetyVestAnalysisPayload {
-  mediaSourceId?: string;
-  videoPath: string;
-  modelPath: string;
+export interface RunNoSafetyVestAnalysisPayload extends ApiAnalysisRunRequest {
+  modelVersionId?: string;
+  videoPath?: string;
+  modelPath?: string;
   roiConfigPath?: string;
   roiId?: string;
   roiNormalized?: boolean;
@@ -89,7 +94,7 @@ export interface RunNoSafetyVestAnalysisPayload {
   violationLabels?: string[];
 }
 
-export type NoSafetyVestAnalysisJobStatus = "queued" | "running" | "completed" | "failed";
+export type NoSafetyVestAnalysisJobStatus = ApiAnalysisJob["status"];
 
 export interface NoSafetyVestAnalysisJob {
   id: string;
@@ -109,14 +114,9 @@ export interface NoSafetyVestAnalysisJob {
   queuePosition: number;
 }
 
-export interface StartNoSafetyVestAnalysisResponse {
-  ok: boolean;
-  jobId: string;
-  status: NoSafetyVestAnalysisJobStatus;
+export interface StartNoSafetyVestAnalysisResponse extends ApiAnalysisJobAccepted {
   message: string;
-  runId: string;
   outputDir: string;
-  createdAt: string;
 }
 
 export interface NoSafetyVestAnalysisJobResponse {
@@ -142,14 +142,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getNoSafetyVestDefaults(): Promise<NoSafetyVestDefaultsResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-safety-vest/defaults`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/no-safety-vest/defaults`);
   return parseResponse<NoSafetyVestDefaultsResponse>(response);
 }
 
 export async function startNoSafetyVestAnalysis(
   payload: RunNoSafetyVestAnalysisPayload
 ): Promise<StartNoSafetyVestAnalysisResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-safety-vest`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/no-safety-vest`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -162,6 +162,6 @@ export async function startNoSafetyVestAnalysis(
 export async function getNoSafetyVestAnalysisJob(
   jobId: string
 ): Promise<NoSafetyVestAnalysisJobResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-safety-vest/jobs/${jobId}`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/no-safety-vest/jobs/${jobId}`);
   return parseResponse<NoSafetyVestAnalysisJobResponse>(response);
 }

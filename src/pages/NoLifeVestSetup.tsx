@@ -24,6 +24,7 @@ import {
 export default function NoLifeVestSetup() {
   const { toast } = useToast();
   const [config, setConfig] = useState<NoLifeVestModuleConfig>(() => readNoLifeVestConfig());
+  const [configVersion, setConfigVersion] = useState(1);
   const [activeModel, setActiveModel] = useState<ModuleConfigActiveModel | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const readiness = useMemo(
@@ -67,6 +68,7 @@ export default function NoLifeVestSetup() {
           ...payload.config,
         };
         setConfig(mergedConfig);
+        setConfigVersion(payload.version);
         setActiveModel(payload.activeModel);
         writeNoLifeVestConfig(mergedConfig);
       })
@@ -132,9 +134,10 @@ export default function NoLifeVestSetup() {
   const saveConfig = async () => {
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("no-life-vest", config);
-      setConfig(saved);
-      writeNoLifeVestConfig(saved);
+      const saved = await updateModuleConfig("no-life-vest", config, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeNoLifeVestConfig(saved.config);
       toast({
         title: "Konfigurasi disimpan",
         description: "Preset default PPE • No Life Vest tersimpan di server dan siap dipakai lintas browser.",
@@ -159,9 +162,10 @@ export default function NoLifeVestSetup() {
     setConfig(defaults);
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("no-life-vest", defaults);
-      setConfig(saved);
-      writeNoLifeVestConfig(saved);
+      const saved = await updateModuleConfig("no-life-vest", defaults, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeNoLifeVestConfig(saved.config);
       toast({
         title: "Konfigurasi direset",
         description: "Preset modul no life vest dikembalikan ke nilai default server.",

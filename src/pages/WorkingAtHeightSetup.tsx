@@ -24,6 +24,7 @@ import {
 export default function WorkingAtHeightSetup() {
   const { toast } = useToast();
   const [config, setConfig] = useState<WorkingAtHeightModuleConfig>(() => readWorkingAtHeightConfig());
+  const [configVersion, setConfigVersion] = useState(1);
   const [activeModel, setActiveModel] = useState<ModuleConfigActiveModel | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -65,6 +66,7 @@ export default function WorkingAtHeightSetup() {
           ...payload.config,
         };
         setConfig(mergedConfig);
+        setConfigVersion(payload.version);
         setActiveModel(payload.activeModel);
         writeWorkingAtHeightConfig(mergedConfig);
       })
@@ -110,9 +112,10 @@ export default function WorkingAtHeightSetup() {
   const saveConfig = async () => {
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("working-at-height", config);
-      setConfig(saved);
-      writeWorkingAtHeightConfig(saved);
+      const saved = await updateModuleConfig("working-at-height", config, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeWorkingAtHeightConfig(saved.config);
       toast({
         title: "Konfigurasi disimpan",
         description: "Preset HSE • Working at Height tersimpan di server dan siap dipakai untuk assessment zone-based.",
@@ -137,9 +140,10 @@ export default function WorkingAtHeightSetup() {
     setConfig(defaults);
     setIsSyncing(true);
     try {
-      const saved = await updateModuleConfig("working-at-height", defaults);
-      setConfig(saved);
-      writeWorkingAtHeightConfig(saved);
+      const saved = await updateModuleConfig("working-at-height", defaults, configVersion);
+      setConfig(saved.config);
+      setConfigVersion(saved.version);
+      writeWorkingAtHeightConfig(saved.config);
       toast({
         title: "Konfigurasi direset",
         description: "Preset working at height dikembalikan ke nilai default server.",

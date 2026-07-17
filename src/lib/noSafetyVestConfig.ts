@@ -37,7 +37,7 @@ export const DEFAULT_NO_SAFETY_VEST_CONFIG: NoSafetyVestModuleConfig = {
     "Gunakan modul ini untuk inspeksi rompi keselamatan pada area produksi, loading point, dan jalur pejalan kaki. Baseline default disarankan memakai model positive vest yang stabil, lalu fallback logic menangani missing vest.",
 };
 
-function normalizeSavedNoSafetyVestConfig(parsed: Partial<NoSafetyVestModuleConfig>): NoSafetyVestModuleConfig {
+export function normalizeSavedNoSafetyVestConfig(parsed: Partial<NoSafetyVestModuleConfig>): NoSafetyVestModuleConfig {
   const normalizedModelPath =
     typeof parsed.modelPath === "string" && parsed.modelPath.startsWith("/Users/")
       ? DEFAULT_NO_SAFETY_VEST_CONFIG.modelPath

@@ -1,5 +1,10 @@
 import type { AnalysisFinding } from "@/lib/analysisFindings";
-import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import type { components } from "@/lib/apiContract";
+import { analysisServerBaseUrl, apiFetch } from "@/lib/noHelmetAnalysis";
+
+type ApiAnalysisRunRequest = components["schemas"]["AnalysisRunRequest"];
+type ApiAnalysisJobAccepted = components["schemas"]["AnalysisJobAccepted"];
+type ApiAnalysisJob = components["schemas"]["AnalysisJob"];
 
 export interface NoLifeVestAnalysisEvent {
   event_id: string;
@@ -44,10 +49,10 @@ export interface NoLifeVestAnalysisSummary {
   createdAt?: string;
 }
 
-export interface RunNoLifeVestAnalysisPayload {
-  mediaSourceId?: string;
-  videoPath: string;
-  modelPath: string;
+export interface RunNoLifeVestAnalysisPayload extends ApiAnalysisRunRequest {
+  modelVersionId?: string;
+  videoPath?: string;
+  modelPath?: string;
   roiConfigPath?: string;
   roiId?: string;
   roiNormalized?: boolean;
@@ -63,7 +68,7 @@ export interface RunNoLifeVestAnalysisPayload {
   violationLabels?: string[];
 }
 
-export type NoLifeVestAnalysisJobStatus = "queued" | "running" | "completed" | "failed";
+export type NoLifeVestAnalysisJobStatus = ApiAnalysisJob["status"];
 
 export interface NoLifeVestAnalysisJob {
   id: string;
@@ -83,14 +88,9 @@ export interface NoLifeVestAnalysisJob {
   queuePosition: number;
 }
 
-export interface StartNoLifeVestAnalysisResponse {
-  ok: boolean;
-  jobId: string;
-  status: NoLifeVestAnalysisJobStatus;
+export interface StartNoLifeVestAnalysisResponse extends ApiAnalysisJobAccepted {
   message: string;
-  runId: string;
   outputDir: string;
-  createdAt: string;
 }
 
 export interface NoLifeVestAnalysisJobResponse {
@@ -116,14 +116,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getNoLifeVestDefaults(): Promise<NoLifeVestDefaultsResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-life-vest/defaults`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/no-life-vest/defaults`);
   return parseResponse<NoLifeVestDefaultsResponse>(response);
 }
 
 export async function startNoLifeVestAnalysis(
   payload: RunNoLifeVestAnalysisPayload
 ): Promise<StartNoLifeVestAnalysisResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-life-vest`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/no-life-vest`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -136,6 +136,6 @@ export async function startNoLifeVestAnalysis(
 export async function getNoLifeVestAnalysisJob(
   jobId: string
 ): Promise<NoLifeVestAnalysisJobResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/no-life-vest/jobs/${jobId}`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/no-life-vest/jobs/${jobId}`);
   return parseResponse<NoLifeVestAnalysisJobResponse>(response);
 }

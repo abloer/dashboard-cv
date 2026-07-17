@@ -187,6 +187,7 @@ export default function Index() {
   const [isAccelerationEnabled, setIsAccelerationEnabled] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingVersion, setEditingVersion] = useState<number | null>(null);
   const [formState, setFormState] = useState<MediaFormState>(EMPTY_FORM);
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
@@ -220,6 +221,7 @@ export default function Index() {
 
   const resetForm = () => {
     setEditingId(null);
+    setEditingVersion(null);
     setFormState(EMPTY_FORM);
     setSelectedUploadFile(null);
   };
@@ -231,6 +233,7 @@ export default function Index() {
 
   const openEditDialog = (item: MediaSource) => {
     setEditingId(item.id);
+    setEditingVersion(item.version);
     setFormState({
       name: item.name,
       location: item.location,
@@ -317,7 +320,11 @@ export default function Index() {
 
     try {
       if (editingId) {
-        await updateMutation.mutateAsync({ id: editingId, payload });
+        await updateMutation.mutateAsync({
+          id: editingId,
+          expectedVersion: editingVersion || 0,
+          payload,
+        });
         toast({
           title: "Source diperbarui",
           description: "Perubahan konfigurasi source berhasil disimpan.",
@@ -351,7 +358,7 @@ export default function Index() {
 
   const deleteMediaItem = async (item: MediaSource) => {
     try {
-      await deleteMutation.mutateAsync(item.id);
+      await deleteMutation.mutateAsync({ id: item.id, expectedVersion: item.version });
       toast({
         title: "Source dihapus",
         description: `${item.name} dikeluarkan dari daftar Media Sources.`,
@@ -369,7 +376,11 @@ export default function Index() {
   const toggleStatus = async (item: MediaSource) => {
     const nextStatus: MediaStatus = item.status === "active" ? "inactive" : "active";
     try {
-      await updateStatusMutation.mutateAsync({ id: item.id, status: nextStatus });
+      await updateStatusMutation.mutateAsync({
+        id: item.id,
+        status: nextStatus,
+        expectedVersion: item.version,
+      });
       toast({
         title: "Status media diperbarui",
         description: `${item.name} sekarang ${formatMediaStatus(nextStatus)}.`,
@@ -442,6 +453,7 @@ export default function Index() {
             : item.executionMode,
         monitoringStatus: nextMonitoringStatus,
         monitoringIntervalSeconds: item.monitoringIntervalSeconds,
+        expectedVersion: item.version,
       });
       toast({
         title:

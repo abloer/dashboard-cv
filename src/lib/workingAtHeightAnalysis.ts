@@ -1,5 +1,10 @@
 import type { AnalysisFinding } from "@/lib/analysisFindings";
-import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import type { components } from "@/lib/apiContract";
+import { analysisServerBaseUrl, apiFetch } from "@/lib/noHelmetAnalysis";
+
+type ApiAnalysisRunRequest = components["schemas"]["AnalysisRunRequest"];
+type ApiAnalysisJobAccepted = components["schemas"]["AnalysisJobAccepted"];
+type ApiAnalysisJob = components["schemas"]["AnalysisJob"];
 
 export interface WorkingAtHeightAnalysisEvent {
   event_id: string;
@@ -42,10 +47,10 @@ export interface WorkingAtHeightAnalysisSummary {
   createdAt?: string;
 }
 
-export interface RunWorkingAtHeightAnalysisPayload {
-  mediaSourceId?: string;
-  videoPath: string;
-  modelPath: string;
+export interface RunWorkingAtHeightAnalysisPayload extends ApiAnalysisRunRequest {
+  modelVersionId?: string;
+  videoPath?: string;
+  modelPath?: string;
   zoneConfigPath?: string;
   zoneId?: string;
   zoneNormalized?: boolean;
@@ -58,7 +63,7 @@ export interface RunWorkingAtHeightAnalysisPayload {
   minimumPresenceSeconds?: number;
 }
 
-export type WorkingAtHeightAnalysisJobStatus = "queued" | "running" | "completed" | "failed";
+export type WorkingAtHeightAnalysisJobStatus = ApiAnalysisJob["status"];
 
 export interface WorkingAtHeightAnalysisJob {
   id: string;
@@ -78,14 +83,9 @@ export interface WorkingAtHeightAnalysisJob {
   queuePosition: number;
 }
 
-export interface StartWorkingAtHeightAnalysisResponse {
-  ok: boolean;
-  jobId: string;
-  status: WorkingAtHeightAnalysisJobStatus;
+export interface StartWorkingAtHeightAnalysisResponse extends ApiAnalysisJobAccepted {
   message: string;
-  runId: string;
   outputDir: string;
-  createdAt: string;
 }
 
 export interface WorkingAtHeightAnalysisJobResponse {
@@ -121,14 +121,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getWorkingAtHeightDefaults(): Promise<WorkingAtHeightDefaultsResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/working-at-height/defaults`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/working-at-height/defaults`);
   return parseResponse<WorkingAtHeightDefaultsResponse>(response);
 }
 
 export async function startWorkingAtHeightAnalysis(
   payload: RunWorkingAtHeightAnalysisPayload
 ): Promise<StartWorkingAtHeightAnalysisResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/working-at-height`, {
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/working-at-height`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -141,6 +141,6 @@ export async function startWorkingAtHeightAnalysis(
 export async function getWorkingAtHeightAnalysisJob(
   jobId: string
 ): Promise<WorkingAtHeightAnalysisJobResponse> {
-  const response = await fetch(`${analysisServerBaseUrl}/analysis/working-at-height/jobs/${jobId}`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/analysis/working-at-height/jobs/${jobId}`);
   return parseResponse<WorkingAtHeightAnalysisJobResponse>(response);
 }

@@ -1,4 +1,4 @@
-import { analysisServerBaseUrl } from "@/lib/noHelmetAnalysis";
+import { analysisServerBaseUrl, apiFetch } from "@/lib/noHelmetAnalysis";
 import type { AnalysisFinding } from "@/lib/analysisFindings";
 import type {
   MediaExecutionMode,
@@ -138,13 +138,13 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
-  const response = await fetch(`${analysisServerBaseUrl}/dashboard-summary`);
+  const response = await apiFetch(`${analysisServerBaseUrl}/dashboard-summary`);
   const payload = await parseResponse<DashboardSummaryResponse>(response);
   return payload.summary;
 }
 
 export async function getSourceLatestAnalysisSummary(mediaSourceId: string): Promise<DashboardSourceLatestSummaryResponse> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${analysisServerBaseUrl}/dashboard-summary/source/${encodeURIComponent(mediaSourceId)}/latest-analysis`
   );
   return parseResponse<DashboardSourceLatestSummaryResponse>(response);
