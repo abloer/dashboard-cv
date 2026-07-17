@@ -15,9 +15,14 @@ COPY server/package.json server/package-lock.json ./server/
 RUN cd /app/server && npm ci --omit=dev
 
 COPY tools/no_helmet_analysis/requirements.txt ./tools/no_helmet_analysis/requirements.txt
+ARG INSTALL_ANALYSIS_DEPS=true
 RUN python3 -m venv /opt/venv \
   && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-  && /opt/venv/bin/pip install --no-cache-dir -r /app/tools/no_helmet_analysis/requirements.txt
+  && if [ "$INSTALL_ANALYSIS_DEPS" = "true" ]; then \
+    /opt/venv/bin/pip install --no-cache-dir -r /app/tools/no_helmet_analysis/requirements.txt; \
+  else \
+    echo "Skipping analysis Python dependencies for CI container smoke build"; \
+  fi
 
 COPY server ./server
 COPY tools ./tools
