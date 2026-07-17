@@ -94,7 +94,7 @@ jobs:
         run: docker build -f Dockerfile.frontend -t dashboard-cv-frontend:ci .
 
       - name: Frontend container vulnerability scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: dashboard-cv-frontend:ci
           format: table
@@ -106,7 +106,7 @@ jobs:
         run: docker build -f Dockerfile.backend --build-arg INSTALL_ANALYSIS_DEPS=false -t dashboard-cv-backend:ci .
 
       - name: Backend container vulnerability scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: dashboard-cv-backend:ci
           format: table
