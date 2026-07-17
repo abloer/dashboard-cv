@@ -1,5 +1,8 @@
 import { createLogger, createServer } from "vite";
 
+process.env.VITE_SUPABASE_URL = "https://frontend-test.supabase.co";
+process.env.VITE_SUPABASE_PUBLISHABLE_KEY = "frontend-test-publishable-key";
+
 const testModules = [
   "/src/test/frontendRouteSmoke.test.tsx",
   "/src/test/libNormalizers.test.ts",
