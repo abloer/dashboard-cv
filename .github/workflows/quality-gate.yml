@@ -1,0 +1,115 @@
+name: Quality Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+env:
+  TRIVY_SEVERITY: HIGH,CRITICAL
+
+jobs:
+  lint-test-build:
+    name: Node ${{ matrix.node-version }} quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: npm ci --prefix server
+
+      - name: Frontend dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Backend dependency audit
+        run: npm audit --audit-level=high --prefix server
+
+      - name: API contract validation
+        run: npm run validate:api-contract
+
+      - name: Generated API types check
+        run: npm run check:api-types
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Bundle size check
+        run: npm run check:bundle-size
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright smoke tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-node-${{ matrix.node-version }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  container-build:
+    name: Container build gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: lint-test-build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Frontend container build
+        run: docker build -f Dockerfile.frontend -t dashboard-cv-frontend:ci .
+
+      - name: Frontend container vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: dashboard-cv-frontend:ci
+          format: table
+          vuln-type: os,library
+          severity: ${{ env.TRIVY_SEVERITY }}
+          exit-code: "1"
+
+      - name: Backend container build
+        run: docker build -f Dockerfile.backend --build-arg INSTALL_ANALYSIS_DEPS=false -t dashboard-cv-backend:ci .
+
+      - name: Backend container vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: dashboard-cv-backend:ci
+          format: table
+          vuln-type: os,library
+          severity: ${{ env.TRIVY_SEVERITY }}
+          exit-code: "1"
