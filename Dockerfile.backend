@@ -17,7 +17,7 @@ RUN cd /app/server && npm ci --omit=dev
 COPY tools/no_helmet_analysis/requirements.txt ./tools/no_helmet_analysis/requirements.txt
 ARG INSTALL_ANALYSIS_DEPS=true
 RUN python3 -m venv /opt/venv \
-  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools \
   && if [ "$INSTALL_ANALYSIS_DEPS" = "true" ]; then \
     /opt/venv/bin/pip install --no-cache-dir -r /app/tools/no_helmet_analysis/requirements.txt; \
   else \
@@ -28,6 +28,10 @@ COPY server ./server
 COPY tools ./tools
 
 RUN mkdir -p /app/runtime-analysis /app/server/data
+
+# npm/corepack are build-time only; the runtime entrypoint is plain node
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+  /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 ENV NODE_ENV=production
 ENV PORT=8081
