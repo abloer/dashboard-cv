@@ -4,6 +4,67 @@
  */
 
 export interface paths {
+    "/dashboard-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the aggregated operational dashboard summary */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["DashboardSummary"];
+                401: components["responses"]["AuthError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dashboard-summary/source/{id}/latest-analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the latest analysis summary for a single media source */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["Id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                200: components["responses"]["SourceLatestAnalysis"];
+                401: components["responses"]["AuthError"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/session": {
         parameters: {
             query?: never;
@@ -1301,6 +1362,72 @@ export interface components {
                     overview: {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+        /** @description Aggregated operational dashboard summary */
+        DashboardSummary: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    /** @constant */
+                    ok: true;
+                    summary: {
+                        totalSources: number;
+                        activeSources: number;
+                        uploadSources: number;
+                        cameraSources: number;
+                        monitoringSources: number;
+                        analyzedSourceCount: number;
+                        totalNoHelmetRuns: number;
+                        totalNoHelmetEvents: number;
+                        totalViolatorTracks: number;
+                        /** Format: date-time */
+                        latestRunAt: string | null;
+                        latestRunSourceName: string | null;
+                        latestAnalysisSummary: {
+                            [key: string]: unknown;
+                        } | null;
+                        sourceSummaries: {
+                            [key: string]: unknown;
+                        }[];
+                        recentRuns: {
+                            [key: string]: unknown;
+                        }[];
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        /** @description Latest analysis summary for a single media source */
+        SourceLatestAnalysis: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    /** @constant */
+                    ok: true;
+                    source: {
+                        [key: string]: unknown;
+                    };
+                    latestAnalysisSummary: {
+                        [key: string]: unknown;
+                    } | null;
+                    latestDetectionSummary: {
+                        [key: string]: unknown;
+                    } | null;
+                    latestPpeByModule: {
+                        [key: string]: unknown;
+                    };
+                    latestDetectionByModule: {
+                        [key: string]: unknown;
+                    };
+                } & {
+                    [key: string]: unknown;
                 };
             };
         };

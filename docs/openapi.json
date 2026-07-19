@@ -17,13 +17,50 @@
     { "name": "Module Configs" },
     { "name": "Models" },
     { "name": "Analysis" },
-    { "name": "Artifacts" }
+    { "name": "Artifacts" },
+    { "name": "Dashboard" }
   ],
   "security": [
     { "cookieAuth": [] },
     { "bearerAuth": [] }
   ],
   "paths": {
+    "/dashboard-summary": {
+      "get": {
+        "tags": ["Dashboard"],
+        "summary": "Read the aggregated operational dashboard summary",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/DashboardSummary"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthError"
+          }
+        }
+      }
+    },
+    "/dashboard-summary/source/{id}/latest-analysis": {
+      "get": {
+        "tags": ["Dashboard"],
+        "summary": "Read the latest analysis summary for a single media source",
+        "x-required-roles": ["viewer", "operator", "admin"],
+        "parameters": [
+          { "$ref": "#/components/parameters/Id" }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/SourceLatestAnalysis"
+          },
+          "401": {
+            "$ref": "#/components/responses/AuthError"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/auth/session": {
       "post": {
         "tags": ["Auth"],
@@ -852,6 +889,89 @@
               "properties": {
                 "ok": { "const": true },
                 "overview": { "type": "object", "additionalProperties": true }
+              }
+            }
+          }
+        }
+      },
+      "DashboardSummary": {
+        "description": "Aggregated operational dashboard summary",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["ok", "summary"],
+              "properties": {
+                "ok": { "const": true },
+                "summary": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "totalSources",
+                    "activeSources",
+                    "uploadSources",
+                    "cameraSources",
+                    "monitoringSources",
+                    "analyzedSourceCount",
+                    "totalNoHelmetRuns",
+                    "totalNoHelmetEvents",
+                    "totalViolatorTracks",
+                    "latestRunAt",
+                    "latestRunSourceName",
+                    "latestAnalysisSummary",
+                    "sourceSummaries",
+                    "recentRuns"
+                  ],
+                  "properties": {
+                    "totalSources": { "type": "integer" },
+                    "activeSources": { "type": "integer" },
+                    "uploadSources": { "type": "integer" },
+                    "cameraSources": { "type": "integer" },
+                    "monitoringSources": { "type": "integer" },
+                    "analyzedSourceCount": { "type": "integer" },
+                    "totalNoHelmetRuns": { "type": "integer" },
+                    "totalNoHelmetEvents": { "type": "integer" },
+                    "totalViolatorTracks": { "type": "integer" },
+                    "latestRunAt": { "type": ["string", "null"], "format": "date-time" },
+                    "latestRunSourceName": { "type": ["string", "null"] },
+                    "latestAnalysisSummary": { "type": ["object", "null"], "additionalProperties": true },
+                    "sourceSummaries": {
+                      "type": "array",
+                      "items": { "type": "object", "additionalProperties": true }
+                    },
+                    "recentRuns": {
+                      "type": "array",
+                      "items": { "type": "object", "additionalProperties": true }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "SourceLatestAnalysis": {
+        "description": "Latest analysis summary for a single media source",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "ok",
+                "source",
+                "latestAnalysisSummary",
+                "latestDetectionSummary",
+                "latestPpeByModule",
+                "latestDetectionByModule"
+              ],
+              "properties": {
+                "ok": { "const": true },
+                "source": { "type": "object", "additionalProperties": true },
+                "latestAnalysisSummary": { "type": ["object", "null"], "additionalProperties": true },
+                "latestDetectionSummary": { "type": ["object", "null"], "additionalProperties": true },
+                "latestPpeByModule": { "type": "object", "additionalProperties": true },
+                "latestDetectionByModule": { "type": "object", "additionalProperties": true }
               }
             }
           }

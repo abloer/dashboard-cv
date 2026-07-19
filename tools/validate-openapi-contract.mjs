@@ -6,6 +6,8 @@ const contract = JSON.parse(fs.readFileSync(contractPath, "utf8"));
 
 const requiredPaths = [
   "/auth/session",
+  "/dashboard-summary",
+  "/dashboard-summary/source/{id}/latest-analysis",
   "/media-sources",
   "/media-sources/{id}",
   "/media-sources/{id}/status",
