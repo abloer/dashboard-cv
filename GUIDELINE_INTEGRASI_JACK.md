@@ -56,6 +56,39 @@ Disusun: 2026-07-17. Dokumen ini merangkum diskusi perencanaan awal dan menjadi 
   - Opsi termurah: UI dashboard existing dengan akun viewer per tenant. Portal khusus pelanggan dipertimbangkan belakangan.
 - Privasi berubah dari kebijakan internal → **komitmen kontraktual** (isolasi data antar pelanggan, retensi jelas) mulai fase A.
 
+## 4b. Rancangan Skill `cv_dashboard` (Fase 1, read-only) — disusun 2026-07-19
+
+Lokasi implementasi: repo Jack `~/qmindstudio/jackartha/skills/cv_dashboard/`. Konvensi terverifikasi dari skill existing (`kurs_uang`, `db_admin`, `gambar_ai`): folder `skills/<nama>/` berisi `SKILL.md` (spec compact: "Kapan menggunakan / Kapan TIDAK / contoh `<tool_call>`") + `<nama>.py` (dict `TOOLS` + `execute(tool_name, params) -> str` + helper `_`). Output skill = string. Secret via `.env` root → di-expose di `config.py` (`os.getenv`), skill `from config import ...`. HTTP pakai `requests`.
+
+**Config baru di Jack** (`.env` + `config.py`):
+- `CV_DASHBOARD_BASE_URL` = `https://vision.axometrix.com/api` (atau host origin unproxied bila jalur Cloudflare dilewati — lihat §6).
+- `CV_DASHBOARD_TOKEN` = nilai `AUTH_TOKEN_OPERATOR` dari `.env.production` dashboard.
+- `CV_DASHBOARD_SIMULATE` = `true|false` (default false) untuk mode fixture tanpa server.
+
+**Tools Fase 1 (read-only) → endpoint riil dashboard** (semua kirim header `Authorization: Bearer {CV_DASHBOARD_TOKEN}`, timeout ~15s):
+| Tool | Endpoint | Guna |
+|---|---|---|
+| `cv_daily_summary` | `GET /dashboard-summary` | ringkasan: total source, run, event pelanggaran, run terakhir |
+| `cv_list_sources` | `GET /media-sources` | daftar kamera/upload + status |
+| `cv_source_latest` | `GET /dashboard-summary/source/{id}/latest-analysis` | analisis terbaru satu source |
+| `cv_job_status` | `GET /analysis/{moduleKey}/jobs/{id}` | status job analisis (untuk Fase 2) |
+
+**Kontrak API — WAJIB sebelum implementasi:** `GET /dashboard-summary` dan `GET /dashboard-summary/source/:id/latest-analysis` HIDUP di server tapi BELUM ada di `docs/openapi.json` (contract drift, temuan 2026-07-19). Karena Jack jadi konsumen kontrak (keputusan §2.4), tambahkan dua path ini ke OpenAPI + regen `apiContract.ts` + lolos `validate:api-contract` sebelum Jack bergantung padanya. Ini pekerjaan di repo dashboard, bukan Jack.
+
+**Error handling:** setiap tool kembalikan string Indonesia yang jelas untuk 401/403/timeout/connection-refused (jangan bocorkan detail internal). Nilai numerik diformat ramah.
+
+**`/simulate` (aturan Jack — fitur dependent inbound eksternal wajib punya mode simulasi):** bila `CV_DASHBOARD_SIMULATE=true`, `execute()` kembalikan fixture statis (bentuk sama dengan respons riil) tanpa HTTP call, agar bisa uji brain + SKILL.md tanpa server dashboard.
+
+**Urutan kerja Fase 1:** (1) tambah 2 path ke OpenAPI dashboard + regen types (repo ini). (2) Daftarkan work package di `ROADMAP.md` Jack (aturan CLAUDE.md Jack — ROADMAP-first). (3) Bereskan §6 (Cloudflare) agar API reachable dari VPS Jack. (4) Implement skill + `/simulate`. (5) Uji: `/simulate` dulu, lalu live via token operator.
+
+## 6. Runbook Cloudflare (aksi owner — blocker Fase 1)
+
+Domain `vision.axometrix.com` proxied Cloudflare (zone `axometrix.com`). Traefik shared-stack `hosting-traefik-1` melayani banyak zona lain di VPS (beritapers.id, geosyndo.co.id, medlink, dll) — hati-hati, perubahan traefik berdampak ke semua.
+
+**Blocker 1 — challenge blokir `/api/*` (WAJIB untuk Fase 1).** Terverifikasi: `https://vision.axometrix.com/api/health` via edge → 403 "Just a moment". Browser lolos (JS challenge), klien API Jack tidak. Rekomendasi (paling kecil blast radius, plan-independent): **IP Access Rule Allow** untuk IP egress VPS Jack — Cloudflare → zona axometrix.com → Security → WAF → Tools → IP Access Rules → Allow `<IP VPS Jack>` (ambil via `curl ifconfig.me` dari VPS Jack). Alternatif: WAF custom rule Skip untuk `http.host eq "vision.axometrix.com" and starts_with(http.request.uri.path,"/api/")`; atau subdomain origin DNS-only (grey cloud) khusus dipanggil Jack.
+
+**Blocker 2 — token DNS Cloudflare Traefik invalid (higiene, bukan blocker langsung).** Log traefik: `Invalid access token` (403/429) → renewal Let's Encrypt SEMUA domain VPS gagal; cert `vision.axometrix.com` masih default Traefik (aman karena cert edge Cloudflare menutupi). Perbaikan: Cloudflare → My Profile → API Tokens → Create Token → template "Edit zone DNS" → Zone:DNS:Edit untuk SEMUA zona yang dikelola Traefik → update env `CF_DNS_API_TOKEN`/`CF_API_TOKEN` di stack traefik → restart `hosting-traefik-1`.
+
 ## 5. Prasyarat Teknis dari Roadmap Existing (paralel, bukan bagian integrasi)
 
 - Migrasi persistence JSON → database — naik prioritas: prasyarat Fase A.
