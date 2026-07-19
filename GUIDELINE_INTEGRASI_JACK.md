@@ -73,13 +73,13 @@ Lokasi implementasi: repo Jack `~/qmindstudio/jackartha/skills/cv_dashboard/`. K
 | `cv_source_latest` | `GET /dashboard-summary/source/{id}/latest-analysis` | analisis terbaru satu source |
 | `cv_job_status` | `GET /analysis/{moduleKey}/jobs/{id}` | status job analisis (untuk Fase 2) |
 
-**Kontrak API — WAJIB sebelum implementasi:** `GET /dashboard-summary` dan `GET /dashboard-summary/source/:id/latest-analysis` HIDUP di server tapi BELUM ada di `docs/openapi.json` (contract drift, temuan 2026-07-19). Karena Jack jadi konsumen kontrak (keputusan §2.4), tambahkan dua path ini ke OpenAPI + regen `apiContract.ts` + lolos `validate:api-contract` sebelum Jack bergantung padanya. Ini pekerjaan di repo dashboard, bukan Jack.
+**Kontrak API — SELESAI 2026-07-20 (commit `595babfa`):** `GET /dashboard-summary` dan `GET /dashboard-summary/source/:id/latest-analysis` kini terdokumentasi di `docs/openapi.json` (+ response schema `DashboardSummary`/`SourceLatestAnalysis`), `apiContract.ts` di-regen, dan validator naik ke 22 required paths. Contract drift ditutup — Jack boleh bergantung pada kedua endpoint ini sebagai kontrak resmi.
 
 **Error handling:** setiap tool kembalikan string Indonesia yang jelas untuk 401/403/timeout/connection-refused (jangan bocorkan detail internal). Nilai numerik diformat ramah.
 
 **`/simulate` (aturan Jack — fitur dependent inbound eksternal wajib punya mode simulasi):** bila `CV_DASHBOARD_SIMULATE=true`, `execute()` kembalikan fixture statis (bentuk sama dengan respons riil) tanpa HTTP call, agar bisa uji brain + SKILL.md tanpa server dashboard.
 
-**Urutan kerja Fase 1:** (1) tambah 2 path ke OpenAPI dashboard + regen types (repo ini). (2) Daftarkan work package di `ROADMAP.md` Jack (aturan CLAUDE.md Jack — ROADMAP-first). (3) Bereskan §6 (Cloudflare) agar API reachable dari VPS Jack. (4) Implement skill + `/simulate`. (5) Uji: `/simulate` dulu, lalu live via token operator.
+**Urutan kerja Fase 1:** (1) ~~tambah 2 path ke OpenAPI dashboard + regen types~~ SELESAI 2026-07-20 (`595babfa`). (2) Daftarkan work package di `ROADMAP.md` Jack (aturan CLAUDE.md Jack — ROADMAP-first). (3) Bereskan §6 (Cloudflare) agar API reachable dari VPS Jack. (4) Implement skill + `/simulate`. (5) Uji: `/simulate` dulu, lalu live via token operator.
 
 ## 6. Runbook Cloudflare (aksi owner — blocker Fase 1)
 
