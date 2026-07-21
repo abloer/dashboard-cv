@@ -14,6 +14,8 @@ from tools.no_helmet_analysis.core import (
   match_violation_detections_to_people,
 )
 from tools.no_helmet_analysis.analyze_no_helmet import build_global_summary
+from tools.no_helmet_analysis.analyze_no_helmet import is_stable_track
+from tools.no_helmet_analysis.analyze_no_helmet import resolve_stability_thresholds
 from tools.no_helmet_analysis.analyze_no_helmet import write_summary
 
 
@@ -187,6 +189,37 @@ class PipelineLogicTest(unittest.TestCase):
     self.assertEqual(summary["violators"][0]["event_count"], 2)
     self.assertIn("Estimasi jumlah orang yang terlihat di video adalah 1", summary["narrative"])
     self.assertIn("1 raw track", summary["narrative"])
+
+  def test_is_stable_track_rejects_sparse_fragment(self) -> None:
+    # Real-world regression (run-1775788597754): two real people tracked the
+    # full 140-frame window, plus a 10-frame ghost at video start that inflated
+    # the person estimate to 3. With the presence-ratio filter the ghost drops.
+    real = {"event_count": 0, "observed_frame_count": 140}
+    violator = {"event_count": 6, "observed_frame_count": 140}
+    ghost = {"event_count": 0, "observed_frame_count": 10}
+    brief_violator = {"event_count": 1, "observed_frame_count": 3}
+
+    self.assertTrue(is_stable_track(real, 140, 10, 0.15))
+    self.assertTrue(is_stable_track(violator, 140, 10, 0.15))
+    self.assertFalse(is_stable_track(ghost, 140, 10, 0.15))  # 10 < 0.15*140=21
+    # A violator is never suppressed, even if only seen a few frames.
+    self.assertTrue(is_stable_track(brief_violator, 140, 10, 0.15))
+
+  def test_resolve_stability_thresholds_defaults_and_overrides(self) -> None:
+    frames, ratio = resolve_stability_thresholds({})
+    self.assertEqual(frames, 10)
+    self.assertAlmostEqual(ratio, 0.15)
+    frames, ratio = resolve_stability_thresholds(
+      {"ANALYSIS_MIN_STABLE_FRAMES": "25", "ANALYSIS_MIN_STABLE_PRESENCE_RATIO": "0.3"}
+    )
+    self.assertEqual(frames, 25)
+    self.assertAlmostEqual(ratio, 0.3)
+    # Bad values fall back to defaults, ratio clamped to [0, 1].
+    frames, ratio = resolve_stability_thresholds(
+      {"ANALYSIS_MIN_STABLE_FRAMES": "abc", "ANALYSIS_MIN_STABLE_PRESENCE_RATIO": "9"}
+    )
+    self.assertEqual(frames, 10)
+    self.assertAlmostEqual(ratio, 1.0)
 
   def test_global_summary_counts_detected_tracks_without_violations(self) -> None:
     tracker = SimpleTracker(iou_threshold=0.2)

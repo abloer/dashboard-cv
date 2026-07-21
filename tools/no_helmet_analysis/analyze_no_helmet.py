@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import subprocess
 import sys
 from dataclasses import asdict
@@ -219,15 +220,54 @@ def normalize_roi(
   return [(x * width, y * height) for x, y in polygon]
 
 
-def is_stable_track(track_summary: dict[str, Any]) -> bool:
-  # Treat very short-lived IDs as tracker fragments unless they also carry a violation event.
-  return track_summary["event_count"] > 0 or track_summary["observed_frame_count"] >= 10
+DEFAULT_MIN_STABLE_FRAMES = 10
+DEFAULT_MIN_STABLE_PRESENCE_RATIO = 0.15
+
+
+def resolve_stability_thresholds(env: dict[str, str] | None = None) -> tuple[int, float]:
+  """Read stability thresholds from env (tunable per-site), with safe defaults."""
+  source = env if env is not None else os.environ
+  try:
+    min_frames = int(source.get("ANALYSIS_MIN_STABLE_FRAMES", str(DEFAULT_MIN_STABLE_FRAMES)))
+  except (TypeError, ValueError):
+    min_frames = DEFAULT_MIN_STABLE_FRAMES
+  try:
+    min_ratio = float(
+      source.get("ANALYSIS_MIN_STABLE_PRESENCE_RATIO", str(DEFAULT_MIN_STABLE_PRESENCE_RATIO))
+    )
+  except (TypeError, ValueError):
+    min_ratio = DEFAULT_MIN_STABLE_PRESENCE_RATIO
+  return max(1, min_frames), min(max(min_ratio, 0.0), 1.0)
+
+
+def is_stable_track(
+  track_summary: dict[str, Any],
+  reference_frame_count: int = 0,
+  min_frames: int = DEFAULT_MIN_STABLE_FRAMES,
+  min_ratio: float = 0.0,
+) -> bool:
+  # A track that produced a violation always counts — safety-critical path,
+  # never suppressed regardless of how briefly it was tracked.
+  if track_summary["event_count"] > 0:
+    return True
+  frames = track_summary["observed_frame_count"]
+  # Absolute floor: discard obvious tracker fragments (a few flicker frames).
+  if frames < min_frames:
+    return False
+  # Presence ratio: a non-violating track must be observed for a meaningful
+  # fraction of the busiest subject's presence. This rejects ID fragments and
+  # false positives that briefly appear alongside longer real tracks (e.g. a
+  # ~10/140-frame ghost at video start that inflates the person estimate).
+  if reference_frame_count > 0 and frames < min_ratio * reference_frame_count:
+    return False
+  return True
 
 
 def build_global_summary(
   events: list[EventRecord],
   tracks: dict[int, Track],
   finding_label: str = "no helmet",
+  analyzed_frame_count: int | None = None,
 ) -> dict[str, Any]:
   countable_events = [event for event in events if event.status == "violation"]
   uncertain_events = [event for event in events if event.status == "uncertain"]
@@ -273,7 +313,20 @@ def build_global_summary(
 
   detected_track_count = len(detected_tracks)
   detected_tracks_in_roi_count = sum(1 for track in detected_tracks if track["in_roi"])
-  stable_detected_tracks = [track for track in detected_tracks if is_stable_track(track)]
+  min_stable_frames, min_stable_ratio = resolve_stability_thresholds()
+  observed_frame_counts = [track["observed_frame_count"] for track in detected_tracks]
+  # Reference = how long the busiest subject was present. Prefer the true
+  # analyzed frame count; fall back to the longest track when not provided.
+  reference_frame_count = (
+    analyzed_frame_count
+    if isinstance(analyzed_frame_count, int) and analyzed_frame_count > 0
+    else (max(observed_frame_counts) if observed_frame_counts else 0)
+  )
+  stable_detected_tracks = [
+    track
+    for track in detected_tracks
+    if is_stable_track(track, reference_frame_count, min_stable_frames, min_stable_ratio)
+  ]
   stable_detected_track_count = len(stable_detected_tracks)
   stable_detected_tracks_in_roi_count = sum(1 for track in stable_detected_tracks if track["in_roi"])
 
@@ -410,7 +463,9 @@ def write_summary(
       tracks[event.track_id].positive_ppe_seen
     )
   ]
-  global_summary = build_global_summary(reportable_events, tracks, finding_label)
+  global_summary = build_global_summary(
+    reportable_events, tracks, finding_label, analyzed_frame_count
+  )
   summary = {
     "video_path": metadata["video_path"],
     "duration_seconds": metadata["duration_seconds"],
