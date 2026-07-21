@@ -1,7 +1,8 @@
-import { Bell, Search, User, RefreshCw } from "lucide-react";
+import { Bell, Search, User, RefreshCw, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { logout } from "@/lib/auth";
 
 interface HeaderProps {
   title: string;
@@ -9,6 +10,11 @@ interface HeaderProps {
 }
 
 export function Header({ title, subtitle }: HeaderProps) {
+  const handleLogout = async () => {
+    await logout();
+    window.location.assign("/login");
+  };
+
   return (
     <header className="flex items-center justify-between mb-6 animate-fade-in">
       <div>
@@ -50,6 +56,16 @@ export function Header({ title, subtitle }: HeaderProps) {
             <p className="text-sm font-medium text-foreground">Admin</p>
             <p className="text-xs text-muted-foreground">Supervisor</p>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleLogout}
+            title="Keluar"
+            aria-label="Keluar"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <LogOut className="w-4 h-4" />
+          </Button>
         </div>
       </div>
     </header>

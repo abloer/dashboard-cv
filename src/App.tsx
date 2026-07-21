@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AppErrorBoundary } from "@/components/app/AppErrorBoundary";
 import Index from "./pages/Index";
+import Login from "./pages/Login";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
@@ -40,6 +41,7 @@ const RouteLoadingFallback = () => (
 export const AppRoutes = () => (
   <Suspense fallback={<RouteLoadingFallback />}>
     <Routes>
+      <Route path="/login" element={<Login />} />
       <Route path="/" element={<Index />} />
       <Route path="/output-data" element={<OutputData />} />
       <Route path="/analysis-setup" element={<AnalysisSetup />} />

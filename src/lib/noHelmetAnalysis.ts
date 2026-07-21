@@ -182,10 +182,25 @@ export const analysisServerBaseUrl =
   (import.meta.env.VITE_ANALYSIS_SERVER_URL as string | undefined)?.replace(/\/$/, "") ||
   DEFAULT_ANALYSIS_SERVER_URL;
 
+let redirectingToLogin = false;
+
 export function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   return fetch(input, {
     ...init,
     credentials: init.credentials ?? "include",
+  }).then((response) => {
+    // Unauthenticated → bounce to the login page (single-flight, browser only).
+    if (
+      response.status === 401 &&
+      typeof window !== "undefined" &&
+      !redirectingToLogin &&
+      window.location.pathname !== "/login"
+    ) {
+      redirectingToLogin = true;
+      const from = window.location.pathname + window.location.search;
+      window.location.assign(`/login?from=${encodeURIComponent(from)}`);
+    }
+    return response;
   });
 }
 

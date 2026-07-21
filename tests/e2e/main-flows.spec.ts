@@ -56,3 +56,20 @@ test("Output Data renders dashboard with fixture API", async ({ page }) => {
   await expect(page.getByText("Total Sources")).toBeVisible();
   await expect(page.getByText("Ringkasan hasil analisis dari seluruh source")).toBeVisible();
 });
+
+test("Login page renders the access token form", async ({ page }) => {
+  await page.goto("/login");
+
+  await expect(page.getByRole("heading", { name: "Masuk ke Dashboard" })).toBeVisible();
+  await expect(page.getByLabel("Access token")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Masuk" })).toBeVisible();
+});
+
+test("Login success redirects to the dashboard", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Access token").fill("fixture-operator-token");
+  await page.getByRole("button", { name: "Masuk" }).click();
+
+  // Session exchange is mocked ok by the fixture catch-all → app root renders.
+  await expect(page.getByRole("heading", { name: "Media Sources" })).toBeVisible();
+});
